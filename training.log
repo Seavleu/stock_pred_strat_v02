@@ -1,0 +1,74 @@
+[2025-03-04 11:46:04] INFO: Engineered features saved to data/processed/engineered_features.csv
+[2025-03-04 11:47:20] INFO: Best hyperparameters:
+[2025-03-04 11:47:21] INFO: Final Training - Epoch [1/20], Loss: 0.448947
+[2025-03-04 11:47:22] INFO: Final Training - Epoch [2/20], Loss: 0.443838
+[2025-03-04 11:47:23] INFO: Final Training - Epoch [3/20], Loss: 0.444452
+[2025-03-04 11:47:24] INFO: Final Training - Epoch [4/20], Loss: 0.445151
+[2025-03-04 11:47:26] INFO: Final Training - Epoch [5/20], Loss: 0.443695
+[2025-03-04 11:47:27] INFO: Final Training - Epoch [6/20], Loss: 0.443199
+[2025-03-04 11:47:28] INFO: Final Training - Epoch [7/20], Loss: 0.443805
+[2025-03-04 11:47:29] INFO: Final Training - Epoch [8/20], Loss: 0.443986
+[2025-03-04 11:47:30] INFO: Final Training - Epoch [9/20], Loss: 0.443914
+[2025-03-04 11:47:31] INFO: Final Training - Epoch [10/20], Loss: 0.443344
+[2025-03-04 11:47:33] INFO: Final Training - Epoch [11/20], Loss: 0.443205
+[2025-03-04 11:47:34] INFO: Final Training - Epoch [12/20], Loss: 0.443090
+[2025-03-04 11:47:35] INFO: Final Training - Epoch [13/20], Loss: 0.443462
+[2025-03-04 11:47:36] INFO: Final Training - Epoch [14/20], Loss: 0.443132
+[2025-03-04 11:47:37] INFO: Final Training - Epoch [15/20], Loss: 0.443127
+[2025-03-04 11:47:39] INFO: Final Training - Epoch [16/20], Loss: 0.443200
+[2025-03-04 11:47:40] INFO: Final Training - Epoch [17/20], Loss: 0.443132
+[2025-03-04 11:47:41] INFO: Final Training - Epoch [18/20], Loss: 0.443221
+[2025-03-04 11:47:42] INFO: Final Training - Epoch [19/20], Loss: 0.443155
+[2025-03-04 11:47:43] INFO: Final Training - Epoch [20/20], Loss: 0.443195
+[2025-03-04 11:47:43] INFO: Final model saved to models/seq2seq_lstm_attention.pth
+[2025-03-04 11:47:44] INFO: MSE: 0.4414, RMSE: 0.6644, R2: 0.0037, MAPE: 1.2366
+[2025-03-04 11:47:44] INFO: Deployment pipeline can now be set up, do it later;D
+[2025-03-04 13:02:05] INFO: Engineered features saved to data/processed/engineered_features.csv
+[2025-03-04 13:03:08] INFO: Best hyperparameters:
+[2025-03-04 13:03:09] INFO: Final Training - Epoch [1/20], Loss: 0.444567
+[2025-03-04 13:03:10] INFO: Final Training - Epoch [2/20], Loss: 0.444660
+[2025-03-04 13:03:11] INFO: Final Training - Epoch [3/20], Loss: 0.444038
+[2025-03-04 13:03:12] INFO: Final Training - Epoch [4/20], Loss: 0.444553
+[2025-03-04 13:03:13] INFO: Final Training - Epoch [5/20], Loss: 0.444695
+[2025-03-04 13:03:14] INFO: Final Training - Epoch [6/20], Loss: 0.444009
+[2025-03-04 13:03:15] INFO: Final Training - Epoch [7/20], Loss: 0.443604
+[2025-03-04 13:03:16] INFO: Final Training - Epoch [8/20], Loss: 0.443473
+[2025-03-04 13:03:18] INFO: Final Training - Epoch [9/20], Loss: 0.444066
+[2025-03-04 13:03:19] INFO: Final Training - Epoch [10/20], Loss: 0.444491
+[2025-03-04 13:03:20] INFO: Final Training - Epoch [11/20], Loss: 0.443275
+[2025-03-04 13:03:21] INFO: Final Training - Epoch [12/20], Loss: 0.443618
+[2025-03-04 13:03:22] INFO: Final Training - Epoch [13/20], Loss: 0.442938
+[2025-03-04 13:03:23] INFO: Final Training - Epoch [14/20], Loss: 0.443473
+[2025-03-04 13:03:24] INFO: Final Training - Epoch [15/20], Loss: 0.443998
+[2025-03-04 13:03:26] INFO: Final Training - Epoch [16/20], Loss: 0.443357
+[2025-03-04 13:03:27] INFO: Final Training - Epoch [17/20], Loss: 0.443498
+[2025-03-04 13:03:28] INFO: Final Training - Epoch [18/20], Loss: 0.443140
+[2025-03-04 13:03:29] INFO: Final Training - Epoch [19/20], Loss: 0.443115
+[2025-03-04 13:03:30] INFO: Final Training - Epoch [20/20], Loss: 0.443018
+[2025-03-04 13:03:30] INFO: Final model saved to models/seq2seq_lstm_attention.pth
+[2025-03-04 13:03:31] INFO: MSE: 0.4210, RMSE: 0.6489, R2: 0.0499, MAPE: 1.2811
+[2025-03-04 16:37:26] INFO: Engineered features saved to data/processed/engineered_features.csv
+[2025-03-04 16:37:41] INFO: Engineered features saved to data/processed/engineered_features.csv
+[2025-03-04 16:38:53] INFO: Best hyperparameters:
+[2025-03-04 16:38:54] INFO: Final Training - Epoch [1/20], Loss: 0.448849
+[2025-03-04 16:38:56] INFO: Final Training - Epoch [2/20], Loss: 0.447345
+[2025-03-04 16:38:57] INFO: Final Training - Epoch [3/20], Loss: 0.446765
+[2025-03-04 16:38:58] INFO: Final Training - Epoch [4/20], Loss: 0.446334
+[2025-03-04 16:39:00] INFO: Final Training - Epoch [5/20], Loss: 0.446348
+[2025-03-04 16:39:01] INFO: Final Training - Epoch [6/20], Loss: 0.445465
+[2025-03-04 16:39:03] INFO: Final Training - Epoch [7/20], Loss: 0.445648
+[2025-03-04 16:39:04] INFO: Final Training - Epoch [8/20], Loss: 0.445385
+[2025-03-04 16:39:05] INFO: Final Training - Epoch [9/20], Loss: 0.445519
+[2025-03-04 16:39:07] INFO: Final Training - Epoch [10/20], Loss: 0.445832
+[2025-03-04 16:39:08] INFO: Final Training - Epoch [11/20], Loss: 0.446190
+[2025-03-04 16:39:09] INFO: Final Training - Epoch [12/20], Loss: 0.446049
+[2025-03-04 16:39:11] INFO: Final Training - Epoch [13/20], Loss: 0.445457
+[2025-03-04 16:39:12] INFO: Final Training - Epoch [14/20], Loss: 0.445414
+[2025-03-04 16:39:13] INFO: Final Training - Epoch [15/20], Loss: 0.445385
+[2025-03-04 16:39:15] INFO: Final Training - Epoch [16/20], Loss: 0.445490
+[2025-03-04 16:39:16] INFO: Final Training - Epoch [17/20], Loss: 0.445393
+[2025-03-04 16:39:17] INFO: Final Training - Epoch [18/20], Loss: 0.445626
+[2025-03-04 16:39:19] INFO: Final Training - Epoch [19/20], Loss: 0.445297
+[2025-03-04 16:39:20] INFO: Final Training - Epoch [20/20], Loss: 0.445372
+[2025-03-04 16:39:20] INFO: Final model saved to models/seq2seq_lstm_attention.pth
+[2025-03-04 16:39:21] INFO: MSE: 0.4375, RMSE: 0.6614, R2: 0.0176, MAPE: 1.2972

@@ -1,0 +1,42 @@
+# -------------------------
+# General  
+# -------------------------
+pandas
+numpy
+scipy
+scikit-learn
+matplotlib
+plotly
+seaborn
+# -------------------------
+# Financial Data & APIs
+# -------------------------
+yfinance
+requests
+# -------------------------
+# DL
+# -------------------------
+torch
+transformers
+# -------------------------
+# RL
+# -------------------------
+gym
+stable-baselines3
+# -------------------------
+# NLP & SA
+# -------------------------
+vaderSentiment
+# -------------------------
+# Model Serving & Deployment
+# -------------------------
+fastapi
+uvicorn
+# -------------------------
+# Others
+# -------------------------
+pyyaml
+optuna
+shap
+xgboost
+docker
