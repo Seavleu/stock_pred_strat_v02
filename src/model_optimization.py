@@ -12,6 +12,7 @@ import sys
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib
 import seaborn as sns
 import optuna
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_percentage_error
@@ -24,7 +25,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from feature_engineering import feature_engineering_pipeline
-
+matplotlib.use("Agg")
 #############################################
 # 1. Feature Selection Functions
 #############################################
@@ -58,14 +59,22 @@ def perform_feature_selection(engineered_df):
     # Plot correlation matrix to spot redundancy
     plot_correlation_matrix(engineered_df.drop(columns=["timestamp"]))
 
-    # Use SHAP to get feature importance with a baseline XGBoost model
+    # --- Modified SHAP Section ---
+    # Sample a subset of the data for SHAP analysis
+    sample_size = min(1000, len(X))
+    X_sample = X.sample(n=sample_size, random_state=42)
+    y_sample = y.loc[X_sample.index]
+
     xgb_model = xgb.XGBRegressor(n_estimators=100, random_state=42)
-    xgb_model.fit(X, y)
+    xgb_model.fit(X_sample, y_sample)
     explainer = shap.TreeExplainer(xgb_model)
-    shap_values = explainer.shap_values(X)
-    shap.summary_plot(shap_values, X, show=False)
+    shap_values = explainer.shap_values(X_sample)
+    # Save the SHAP summary plot instead of showing it interactively
+    shap.summary_plot(shap_values, X_sample, show=False)
     plt.title("SHAP Summary Plot")
-    plt.show()
+    plt.savefig("shap_summary_plot.png")
+    plt.close()
+    print("SHAP summary plot saved as 'shap_summary_plot.png'.")
 
     # For demonstration, select the top 50% of features based on MI score.
     num_selected = max(1, int(len(mi_scores) * 0.5))
