@@ -1,8 +1,6 @@
 # Orchestrates data ingestion, cleaning, and feature engineering
-#!/usr/bin/env bash
 
-# Example usage:
-# bash scripts/run_data_pipeline.sh
+# run: bash scripts/run_data_pipeline.sh
 
 echo "=== Fetching Stock Data ==="
 python -c "
