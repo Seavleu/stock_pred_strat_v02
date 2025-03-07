@@ -1,4 +1,4 @@
-# Functions for handling missing values, outliers, or merges.
+# functions for handling missing values, outliers, or merges.
 import pandas as pd
 import numpy as np
 import os
@@ -20,11 +20,8 @@ def clean_and_preprocess(csv_file, output_dir="data/processed"):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
-    # Read raw data
     df = pd.read_csv(csv_file, parse_dates=['Date'])
     
-    # Rename columns if necessary (e.g., matching your naming convention)
-    # Example: If your CSV has columns like 'opening_price', 'closing_price', etc.
     rename_cols = {
         "Date": "timestamp",
         "Open": "opening_price",
@@ -37,8 +34,7 @@ def clean_and_preprocess(csv_file, output_dir="data/processed"):
     for old_col, new_col in rename_cols.items():
         if old_col in df.columns:
             df.rename(columns={old_col: new_col}, inplace=True)
-    
-    # Fill missing values: forward fill, then backward fill 
+
     df.ffill(inplace=True)
     df.bfill(inplace=True)
     
@@ -70,8 +66,7 @@ def clean_and_preprocess(csv_file, output_dir="data/processed"):
     return df
 
 '''Usage Example:
-if __name__ == "__main__":
-    # Suppose you have already downloaded AAPL_raw_data.csv
+if __name__ == "__main__": 
     input_csv = "data/raw/AAPL_raw_data.csv"
     cleaned_df = clean_and_preprocess(input_csv)
 '''
