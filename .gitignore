@@ -1,0 +1,15 @@
+**/*.csv
+**/*.json
+**/data/
+**/sandbox*
+.env
+
+articles.txt
+**/*.pth
+**/*.png
+**/__pycache__/
+**/mlruns/
+
+**/*.pkl
+
+!kospi200tickers.json

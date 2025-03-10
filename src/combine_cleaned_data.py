@@ -3,7 +3,7 @@ import glob
 import os
 
 def combine_cleaned_files(input_dir="data/processed", output_file="data/processed/combined_cleaned_stock_data.csv"):
-    # Find all cleaned CSV files that follow the pattern *_cleaned_data.csv
+    # find all cleaned CSV files that follow the pattern *_cleaned_data.csv
     all_files = glob.glob(os.path.join(input_dir, "*_cleaned_data.csv"))
     if not all_files:
         print("No cleaned data files found. Please run the cleaning pipeline first.")

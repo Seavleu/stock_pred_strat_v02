@@ -18,9 +18,7 @@ class StockDataset(Dataset):
         """
         self.data = pd.read_csv(csv_file, parse_dates=['timestamp'])
         self.data.sort_values("timestamp", inplace=True)
-        
-        # Drop the timestamp column and any other non-feature columns if needed.
-        # Adjust columns based on your engineered_features.csv structure.
+         
         self.features = self.data.drop(columns=["timestamp"]).values
         self.seq_length = seq_length
 
@@ -29,9 +27,7 @@ class StockDataset(Dataset):
 
     def __getitem__(self, idx):
         x = self.features[idx: idx + self.seq_length]
-        # Here we assume the target is the 'closing_price' which is among the features.
-        # Adjust the target index or column extraction as needed.
-        # For example, if 'closing_price' is the 5th column (0-indexed), then:
+        
         target_index = list(self.data.columns).index("closing_price") - 1  # -1 if timestamp is dropped
         y = self.features[idx + self.seq_length, target_index]
         return torch.tensor(x, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)
