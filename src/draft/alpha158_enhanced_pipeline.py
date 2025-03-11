@@ -30,7 +30,15 @@ from sklearn.linear_model import LinearRegression
 from scipy.stats import pearsonr, spearmanr
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 # comment it out to process dataframes sequentially
+import ray
+ray.init(
+    ignore_reinit_error=True,# this makes sure ray is initialized only once
+    num_cpus=10,  # Adjust based on your system
+    object_store_memory= 4 * 10**9  # 4GB memory limit
+)
 import swifter # for parallel processing of dataframes
+# comment out until here to not use parallelization
+import concurrent.futures # for loading dataframes in parallel
 
 # Fix the import path for log_config
 import sys
@@ -343,17 +351,25 @@ def main():
         sys.exit("Error: No extracted stock data files found in data/raw/korean_stock_extracted/")
     
     logger.info(f"Found {len(file_list)} stock data files")
+    
+    def load_file(file_path):
+        logger.info(f"Loading file: {file_path}")
+        return pd.read_csv(file_path, parse_dates=["timestamp"])
+    # load files in parallel 
+    # use concurrent futures because it's an I/O operation
     df_list = []
-    for f in file_list:
-        logger.info(f"Loading file: {f}")
-        temp_df = pd.read_csv(f, parse_dates=["timestamp"])
-        df_list.append(temp_df)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        df_list = list(executor.map(load_file, 
+                                    file_list[:3] # load only 3 files for faster debugging
+                                    ))
     df_raw = pd.concat(df_list, ignore_index=True)
     logger.info(f"Loaded raw data from {len(file_list)} files; combined shape: {df_raw.shape}")
     print(f"Loaded raw data from {len(file_list)} files; combined shape: {df_raw.shape}")
+    del df_list # clean up memory
 
     # Modification: Process data per company using compute_alpha158_features
     logger.info("Processing data per company")
+
 
     def process_company(company_data):
         company_data = company_data.sort_values("timestamp").reset_index(drop=True)
@@ -364,10 +380,10 @@ def main():
     
     if "swifter" in globals():
         # parallel processing
-        df_processed = df_raw.swifter.groupby("company").apply(process_company)
+        df_processed = df_raw.swifter.groupby("company",  group_keys=False).apply(process_company)
     else:
-        df_processed = df_raw.groupby("company").apply(process_company)
-
+        df_processed = df_raw.groupby("company", group_keys=False).apply(process_company)
+    del df_raw # clean up memory
     
     logger.info(f"After processing per company, shape: {df_processed.shape}")
     print(f"After processing per company, shape: {df_processed.shape}")
@@ -390,12 +406,17 @@ def main():
             scaler_std = StandardScaler()
             group[technical_features] = scaler_std.fit_transform(group[technical_features])
         return group
+    
+    logger.info(df_processed.index)
+    logger.info(df_processed.columns.to_list())
+    
     if "swifter" in globals():
         # parallel processing
         df_scaled = df_processed.swifter.groupby("company", group_keys=False).apply(scale_group)
     else:
         df_scaled = df_processed.groupby("company", group_keys=False).apply(scale_group)
-    
+    del df_processed # clean up memory
+
     scaled_csv = "data/processed/alpha158_enhanced_features_scaled.csv"
     df_scaled.to_csv(scaled_csv, index=False)
     logger.info(f"Scaled dataset saved to {scaled_csv}")
@@ -406,6 +427,9 @@ def main():
     # Modification: Progressive Training Strategy - Train on a single company first
     company_to_train = df_scaled["company"].unique()[0]
     df_train = df_scaled[df_scaled["company"] == company_to_train].copy()
+
+    del df_scaled # clean up memory
+
     logger.info(f"Training on company: {company_to_train}, shape: {df_train.shape}")
     print(f"Training on company: {company_to_train}, shape: {df_train.shape}")
 
@@ -442,3 +466,7 @@ if __name__ == "__main__":
     logger.info("Starting Alpha158 enhanced pipeline script")
     main()
     logger.info("Alpha158 enhanced pipeline script completed")
+
+# once you are done, run
+# `ray stop`
+# in your terminal to stop the ray instance 
