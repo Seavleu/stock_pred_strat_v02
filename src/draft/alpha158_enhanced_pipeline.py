@@ -29,7 +29,19 @@ from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_percenta
 from sklearn.linear_model import LinearRegression
 from scipy.stats import pearsonr, spearmanr
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
+# comment it out to process dataframes sequentially
+import swifter # for parallel processing of dataframes
 
+# Fix the import path for log_config
+import sys
+import os
+# Add the parent directory to sys.path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from log_config import setup_logger, get_logger # logging handlers.
+
+# logs will be saved in a file called app.log
+setup_logger(log_file_path="app.log")
+logger = get_logger()
 #############################################
 # Modification: TSDataSampler for efficient mini-batching
 #############################################
@@ -115,7 +127,7 @@ def compute_vwap_variations(df):
     Modification: Skip VWAP if 'trading_volume' is not available.
     """
     if "trading_volume" not in df.columns:
-        print("trading_volume not found. Skipping VWAP variations.")
+        logger.warning("trading_volume not found. Skipping VWAP variations.")
         return df
     low_col = "lowest_price" if "lowest_price" in df.columns else "Rolling_Min_5"
     df["typical_price"] = (df["highest_price"] + df[low_col] + df["closing_price"]) / 3
@@ -154,12 +166,14 @@ def compute_alpha158_features(df):
     """
     Compute Alpha158-inspired features and integrate market-wide indicators.
     """
+    logger.info("Starting Alpha158 features computation")
     df = compute_regression_features(df, window=30)
     df = compute_kbar_features(df)
     df = compute_enhanced_lag_features(df, "closing_price", windows=[3, 5, 10, 20])
     df = compute_vwap_variations(df)  # Will be skipped if trading_volume is missing.
     df = integrate_macroeconomic_data(df)
     df = compute_market_indicators(df)
+    logger.info("Alpha158 features computation completed")
     return df
 
 #############################################
@@ -177,11 +191,11 @@ class StockDataset(Dataset):
         """
         self.seq_length = seq_length
         # Modification: Remove 'company' from features if present.
-        non_feature_cols = ["timestamp", "closing_price", "company"]
+        non_feature_cols = ["timestamp", target_column, "company"]
         if "company" in df.columns:
             self.feature_columns = feature_columns if feature_columns else df.drop(columns=non_feature_cols).columns.tolist()
         else:
-            self.feature_columns = feature_columns if feature_columns else df.drop(columns=["timestamp", "closing_price"]).columns.tolist()
+            self.feature_columns = feature_columns if feature_columns else df.drop(columns=["timestamp", target_column]).columns.tolist()
         self.data = df.sort_values("timestamp").reset_index(drop=True)
         self.features = self.data[self.feature_columns].values
         self.targets = self.data[target_column].values
@@ -213,12 +227,15 @@ class LSTMModel(nn.Module):
 #############################################
 
 def objective(trial, train_loader, input_size):
+    logger.info(f"Starting Optuna trial {trial.number}")
     seq_length = trial.suggest_int("seq_length", 30, 90)
     hidden_size = trial.suggest_int("hidden_size", 32, 128)
     num_layers = trial.suggest_int("num_layers", 1, 3)
     dropout = trial.suggest_float("dropout", 0.1, 0.5)
     learning_rate = trial.suggest_float("learning_rate", 1e-4, 1e-2, log=True)
     num_epochs = 10
+    
+    logger.info(f"Trial {trial.number} parameters: seq_length={seq_length}, hidden_size={hidden_size}, num_layers={num_layers}, dropout={dropout}, learning_rate={learning_rate}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = LSTMModel(input_size, hidden_size, num_layers, dropout).to(device)
@@ -238,13 +255,18 @@ def objective(trial, train_loader, input_size):
             epoch_loss += loss.item() * x_batch.size(0)
         epoch_loss /= len(train_loader.dataset)
         if np.isnan(epoch_loss):
+            logger.warning(f"Trial {trial.number} encountered NaN loss at epoch {epoch}")
             return float("inf")
+        logger.info(f"Trial {trial.number}, Epoch {epoch+1}/{num_epochs}, Loss: {epoch_loss:.6f}")
         trial.report(epoch_loss, epoch)
         if trial.should_prune():
+            logger.info(f"Trial {trial.number} pruned at epoch {epoch+1}")
             raise optuna.exceptions.TrialPruned()
+    logger.info(f"Trial {trial.number} completed with final loss: {epoch_loss:.6f}")
     return epoch_loss
 
 def train_final_model(train_loader, input_size, best_params, num_epochs=20):
+    logger.info(f"Training final model with best parameters: {best_params}")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = LSTMModel(input_size,
                       best_params["hidden_size"],
@@ -267,15 +289,19 @@ def train_final_model(train_loader, input_size, best_params, num_epochs=20):
             epoch_loss += loss.item() * x_batch.size(0)
         epoch_loss /= len(train_loader.dataset)
         scheduler.step(epoch_loss)
+        logger.info(f"Final Training - Epoch [{epoch+1}/{num_epochs}], Loss: {epoch_loss:.6f}")
         print(f"Final Training - Epoch [{epoch+1}/{num_epochs}], Loss: {epoch_loss:.6f}")
+    logger.info("Final model training completed")
     return model
 
 def calculate_ic_ric(y_true, y_pred):
+    logger.info("Calculating Information Coefficient (IC) and Rank Information Coefficient (RIC)")
     ic, _ = pearsonr(y_true, y_pred)
     ric, _ = spearmanr(y_true, y_pred)
     return ic, ric
 
 def evaluate_model(model, data_loader):
+    logger.info("Evaluating model performance")
     model.eval()
     predictions = []
     actuals = []
@@ -289,12 +315,15 @@ def evaluate_model(model, data_loader):
     predictions = np.array(predictions)
     actuals = np.array(actuals)
     if np.isnan(predictions).any() or np.isnan(actuals).any():
+        logger.error("Evaluation data contains NaN values")
         raise ValueError("Evaluation data contains NaN values.")
     mse = mean_squared_error(actuals, predictions)
     rmse = np.sqrt(mse)
     r2 = r2_score(actuals, predictions)
     mape = mean_absolute_percentage_error(actuals, predictions)
     ic, ric = calculate_ic_ric(actuals, predictions)
+    logger.info(f"Evaluation Metrics -> MSE: {mse:.4f}, RMSE: {rmse:.4f}, R2: {r2:.4f}, MAPE: {mape:.4f}")
+    logger.info(f"Information Coefficient (IC): {ic:.4f}, Rank IC (RIC): {ric:.4f}")
     print(f"Evaluation Metrics -> MSE: {mse:.4f}, RMSE: {rmse:.4f}, R2: {r2:.4f}, MAPE: {mape:.4f}")
     print(f"Information Coefficient (IC): {ic:.4f}, Rank IC (RIC): {ric:.4f}")
     return mse, rmse, r2, mape, ic, ric
@@ -304,36 +333,55 @@ def evaluate_model(model, data_loader):
 #############################################
 
 def main():
+    logger.info("Starting Alpha158 enhanced pipeline")
     # Modification: Load raw extracted stock files with company info
     raw_path = "data/raw/korean_stock_extracted/"
     file_pattern = os.path.join(raw_path, "*_stock_data.csv")
     file_list = glob.glob(file_pattern)
     if not file_list:
+        logger.error("No extracted stock data files found in data/raw/korean_stock_extracted/")
         sys.exit("Error: No extracted stock data files found in data/raw/korean_stock_extracted/")
+    
+    logger.info(f"Found {len(file_list)} stock data files")
     df_list = []
     for f in file_list:
+        logger.info(f"Loading file: {f}")
         temp_df = pd.read_csv(f, parse_dates=["timestamp"])
         df_list.append(temp_df)
     df_raw = pd.concat(df_list, ignore_index=True)
+    logger.info(f"Loaded raw data from {len(file_list)} files; combined shape: {df_raw.shape}")
     print(f"Loaded raw data from {len(file_list)} files; combined shape: {df_raw.shape}")
 
     # Modification: Process data per company using compute_alpha158_features
-    df_processed_list = []
-    for company, group in df_raw.groupby("company"):
-        group = group.sort_values("timestamp").reset_index(drop=True)
-        group = compute_alpha158_features(group)
-        group.dropna(inplace=True)
-        df_processed_list.append(group)
-    df_processed = pd.concat(df_processed_list, ignore_index=True)
+    logger.info("Processing data per company")
+
+    def process_company(company_data):
+        company_data = company_data.sort_values("timestamp").reset_index(drop=True)
+        company_data = compute_alpha158_features(company_data)
+        company_data['returns'] = company_data['closing_price'].pct_change(1).shift(-1)
+        company_data.dropna(inplace=True)
+        return company_data
+    
+    if "swifter" in globals():
+        # parallel processing
+        df_processed = df_raw.swifter.groupby("company").apply(process_company)
+    else:
+        df_processed = df_raw.groupby("company").apply(process_company)
+
+    
+    logger.info(f"After processing per company, shape: {df_processed.shape}")
     print(f"After processing per company, shape: {df_processed.shape}")
     
     # Modification: Per-stock normalization
+    logger.info("Performing per-stock normalization")
     def scale_group(group):
+        company = group["company"].iloc[0] if "company" in group.columns else "unknown"
+        logger.info(f"Scaling features for company: {company}")
         all_cols = group.columns.tolist()
-        non_feature_cols = ["timestamp", "closing_price", "company"]
+        non_feature_cols = ["timestamp", "returns", "company"]
         feature_cols = [col for col in all_cols if col not in non_feature_cols]
         # For returns-based features, we use MinMax scaling (-1,1)
-        returns_features = ["closing_price"]  # or add other price-based features if available
+        returns_features = ["returns"]  # or add other price-based features if available
         technical_features = [col for col in feature_cols if col not in returns_features]
         if returns_features:
             scaler_mm = MinMaxScaler(feature_range=(-1, 1))
@@ -342,9 +390,15 @@ def main():
             scaler_std = StandardScaler()
             group[technical_features] = scaler_std.fit_transform(group[technical_features])
         return group
-    df_scaled = df_processed.groupby("company", group_keys=False).apply(scale_group)
+    if "swifter" in globals():
+        # parallel processing
+        df_scaled = df_processed.swifter.groupby("company", group_keys=False).apply(scale_group)
+    else:
+        df_scaled = df_processed.groupby("company", group_keys=False).apply(scale_group)
+    
     scaled_csv = "data/processed/alpha158_enhanced_features_scaled.csv"
     df_scaled.to_csv(scaled_csv, index=False)
+    logger.info(f"Scaled dataset saved to {scaled_csv}")
     print(f"Scaled dataset saved to {scaled_csv}")
 
     # Modification: Integrate market-wide indicators are already computed in compute_market_indicators
@@ -352,29 +406,39 @@ def main():
     # Modification: Progressive Training Strategy - Train on a single company first
     company_to_train = df_scaled["company"].unique()[0]
     df_train = df_scaled[df_scaled["company"] == company_to_train].copy()
+    logger.info(f"Training on company: {company_to_train}, shape: {df_train.shape}")
     print(f"Training on company: {company_to_train}, shape: {df_train.shape}")
 
-    feature_columns = [col for col in df_train.columns if col not in ["timestamp", "closing_price", "company"]]
+    feature_columns = [col for col in df_train.columns if col not in ["timestamp", "returns", "company"]]
     seq_length = 30  # initial value
-    dataset = StockDataset(df_train, seq_length=seq_length, feature_columns=feature_columns, target_column="closing_price")
+    logger.info(f"Creating dataset with {len(feature_columns)} features and sequence length {seq_length}")
+    dataset = StockDataset(df_train, seq_length=seq_length, feature_columns=feature_columns, target_column="returns")
     batch_size = 64
     sampler = TSDataSampler(dataset, batch_size=batch_size)
     train_loader = DataLoader(dataset, batch_sampler=sampler)
     input_size = len(feature_columns)
+    logger.info(f"DataLoader created with batch size {batch_size}")
 
     # Hyperparameter optimization using Optuna
+    logger.info("Starting hyperparameter optimization with Optuna")
     study = optuna.create_study(direction="minimize")
     study.optimize(lambda trial: objective(trial, train_loader, input_size), n_trials=10)
+    logger.info(f"Best hyperparameters: {study.best_params}")
     print("Best hyperparameters:", study.best_params)
     best_params = study.best_params
 
     # Train final model using best hyperparameters
+    logger.info("Training final model with best hyperparameters")
     final_model = train_final_model(train_loader, input_size, best_params, num_epochs=20)
 
     # Evaluate model using IC & RIC alongside traditional metrics
+    logger.info("Evaluating final model")
     evaluate_model(final_model, train_loader)
 
+    logger.info("Enhanced evaluation pipeline complete")
     print("Enhanced evaluation pipeline complete. Next steps: validate on hold-out data, integrate real macroeconomic data, and explore Transformer-based models for multi-stock training.")
 
 if __name__ == "__main__":
+    logger.info("Starting Alpha158 enhanced pipeline script")
     main()
+    logger.info("Alpha158 enhanced pipeline script completed")

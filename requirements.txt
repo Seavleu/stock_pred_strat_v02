@@ -40,3 +40,6 @@ optuna
 shap
 xgboost
 docker
+
+# parallel processing on dataframes
+swifter

@@ -13,3 +13,5 @@ articles.txt
 **/*.pkl
 
 !kospi200tickers.json
+
+app.log
