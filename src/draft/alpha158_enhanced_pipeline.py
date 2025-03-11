@@ -359,9 +359,7 @@ def main():
     # use concurrent futures because it's an I/O operation
     df_list = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-        df_list = list(executor.map(load_file, 
-                                    file_list[:3] # load only 3 files for faster debugging
-                                    ))
+        df_list = list(executor.map(load_file, file_list))
     df_raw = pd.concat(df_list, ignore_index=True)
     logger.info(f"Loaded raw data from {len(file_list)} files; combined shape: {df_raw.shape}")
     print(f"Loaded raw data from {len(file_list)} files; combined shape: {df_raw.shape}")
@@ -406,9 +404,6 @@ def main():
             scaler_std = StandardScaler()
             group[technical_features] = scaler_std.fit_transform(group[technical_features])
         return group
-    
-    logger.info(df_processed.index)
-    logger.info(df_processed.columns.to_list())
     
     if "swifter" in globals():
         # parallel processing
