@@ -2,7 +2,7 @@
 Dynamic Feature Selection using Rolling-Window SHAP Analysis. 
 
 We implements a dynamic feature selection strategy here, first it
-loads the refined dataset from our 'refined_features.csv', then uses
+loads the refined dataset from our 'alpha158_enhanced_features_scaled.csv', then uses
 a rolling-window to compute SHAP values with an XGBoost model,
 -> then aggregates the feature importance over time, and selects features
 that are consistently predictive under different market conditions
@@ -40,7 +40,12 @@ def dynamic_feature_selection(df, window_size=200, step_size=50):
         aggregated_shap (Series): Average absolute SHAP value for each feature.
     """
     # prepare features (X) and target (y)
-    feature_cols = [col for col in df.columns if col not in ["timestamp", "closing_price"]]
+    # feature_cols = [col for col in df.columns if col not in ["timestamp", "closing_price"]]
+    
+    # exclude non-feature columns, including lag features and market-wide indicators
+    excluded_cols = ["timestamp", "closing_price", "company"] + [col for col in df.columns if "lag" in col or "KOSPI" in col or "FX_rate" in col]
+    feature_cols = [col for col in df.columns if col not in excluded_cols]
+
     X = df[feature_cols]
     y = df["closing_price"]
 
@@ -53,6 +58,9 @@ def dynamic_feature_selection(df, window_size=200, step_size=50):
         end = start + window_size
         X_window = X.iloc[start:end]
         y_window = y.iloc[start:end]
+        ''
+        X_window.fillna(0, inplace=True)  # replace NaNs with 0
+        y_window.fillna(method="ffill", inplace=True)  # Forward-fill missing target vals
         
         # fit an XGBoost model on the window
         model = xgb.XGBRegressor(n_estimators=100, random_state=42, verbosity=0)
@@ -93,7 +101,7 @@ def plot_aggregated_shap(aggregated_shap, output_path="docs/dynamic_shap_importa
 
 def main():
     # loaded data -> output from feature_refinement.py
-    refined_csv = "data/processed/refined_features.csv"
+    refined_csv = "data/processed/alpha158_enhanced_features_scaled.csv"
     if not os.path.exists(refined_csv) or os.path.getsize(refined_csv) == 0:
         sys.exit(f"Error: {refined_csv} is missing or empty. Please run the feature refinement pipeline first.")
     
@@ -115,7 +123,7 @@ def main():
     
     keep_cols = ["timestamp", "closing_price"] + selected_features
     dynamic_selected_df = df[keep_cols].copy()
-    output_csv = "data/processed/dynamic_selected_features.csv"
+    output_csv = "data/processed/dynamic_alpha_selected_features.csv"
     dynamic_selected_df.to_csv(output_csv, index=False)
     print(f"Dynamic selected dataset saved to {output_csv}")
 

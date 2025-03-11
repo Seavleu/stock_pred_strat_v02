@@ -1,4 +1,3 @@
-# functions for handling missing values, outliers, or merges.
 import pandas as pd
 import numpy as np
 import os
@@ -6,12 +5,13 @@ from sklearn.preprocessing import MinMaxScaler
 
 def clean_and_preprocess(csv_file, output_dir="data/processed"):
     """
-    Clean missing values, handle anomalies, normalize, and preprocess data.
+    Clean missing values, handle anomalies, normalize, and preprocess raw stock data.
     Saves cleaned data to a CSV in the specified output directory.
     
     Parameters:
         csv_file (str): Path to the raw CSV file containing columns:
-                        ['Date','Open','High','Low','Close','Volume']
+                        [opening_price, highest_price, lowest_price, closing_price,
+                         trading_volume, num_of_shares, company, timestamp]
         output_dir (str): Directory where the cleaned CSV file will be saved.
     
     Returns:
@@ -20,26 +20,17 @@ def clean_and_preprocess(csv_file, output_dir="data/processed"):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     
-    df = pd.read_csv(csv_file, parse_dates=['Date'])
+    df = pd.read_csv(csv_file, parse_dates=['timestamp'])
     
-    rename_cols = {
-        "Date": "timestamp",
-        "Open": "opening_price",
-        "High": "highest_price",
-        "Low": "lowest_price",
-        "Close": "closing_price",
-        "Volume": "trading_volume"
-    }
+    df.columns = df.columns.str.strip()
     
-    for old_col, new_col in rename_cols.items():
-        if old_col in df.columns:
-            df.rename(columns={old_col: new_col}, inplace=True)
-
+    # Fill missing values using forward-fill and backward-fill
     df.ffill(inplace=True)
     df.bfill(inplace=True)
     
-    # Handle anomalies/outliers using IQR clipping on numeric columns
-    numeric_cols = ["opening_price", "highest_price", "lowest_price", "closing_price", "trading_volume"]
+    # Handle anomalies/outliers using IQR clipping on numeric columns.
+    # Here, we process the key numeric columns.
+    numeric_cols = ["opening_price", "highest_price", "lowest_price", "closing_price", "trading_volume", "num_of_shares"]
     for col in numeric_cols:
         if col in df.columns:
             Q1 = df[col].quantile(0.25)
@@ -49,16 +40,17 @@ def clean_and_preprocess(csv_file, output_dir="data/processed"):
             upper_bound = Q3 + 1.5 * IQR
             df[col] = df[col].clip(lower=lower_bound, upper=upper_bound)
     
-    # Normalize numeric data using MinMaxScaler
+    # Normalize numeric data using MinMaxScaler.
+    # Note: You might choose not to scale 'num_of_shares' if it's not a predictive feature.
+    scale_cols = ["opening_price", "highest_price", "lowest_price", "closing_price", "trading_volume"]
     scaler = MinMaxScaler()
-    df[numeric_cols] = scaler.fit_transform(df[numeric_cols])
+    df[scale_cols] = scaler.fit_transform(df[scale_cols])
     
-    # Drop any remaining NaN rows (if any edge cases remain)
+    # Drop any remaining NaN rows.
     df.dropna(inplace=True)
     
-    # Save cleaned data
-    # Example CSV name: "AAPL_cleaned_stock_data.csv"
-    base_filename = os.path.basename(csv_file).replace("_raw_data.csv", "_cleaned_data.csv")
+    # Save cleaned data.
+    base_filename = os.path.basename(csv_file).replace("_stock_data.csv", "_cleaned_data.csv")
     output_path = os.path.join(output_dir, base_filename)
     df.to_csv(output_path, index=False)
     print(f"Saved cleaned data to {output_path}")
@@ -66,7 +58,7 @@ def clean_and_preprocess(csv_file, output_dir="data/processed"):
     return df
 
 '''Usage Example:
-if __name__ == "__main__": 
-    input_csv = "data/raw/AAPL_raw_data.csv"
+if __name__ == "__main__":
+    input_csv = "data/raw/korean_stock_data.csv"
     cleaned_df = clean_and_preprocess(input_csv)
 '''

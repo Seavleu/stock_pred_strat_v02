@@ -40,3 +40,4 @@ optuna
 shap
 xgboost
 docker
+swifter
