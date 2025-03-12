@@ -10,15 +10,20 @@ Objective:
   - Evaluate with IC/RIC metrics.
   - Use swifter to speed up groupby apply operations for per-stock normalization.
 
-Modifications are marked with **"Modification:"**.
+So, first:
+ - load raw multi-stock data using parallel file loading
+ - processes and applies per-stock normalization (swifter)
+ - split: 80/10/10
+ - prepares the dataset with TSDataSampler for mini-batching
+ - opt and trains both LSTM & Transformer -> evaluate on splits
+ - run backtesting on test set using transformer as an example
 """
-
 import os
 import sys
 import glob
 import numpy as np
 import pandas as pd
-import swifter  
+import swifter                    
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -32,28 +37,17 @@ from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_percenta
 from sklearn.linear_model import LinearRegression
 from scipy.stats import pearsonr, spearmanr
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
-from backtesting import backtest_model  
-# comment it out to process dataframes sequentially
-import ray
-ray.init(
-    ignore_reinit_error=True,# this makes sure ray is initialized only once
-    num_cpus=10,  # Adjust based on your system
-    object_store_memory= 4 * 10**9  # 4GB memory limit
-)
-import swifter # for parallel processing of dataframes
-# comment out until here to not use parallelization
-import concurrent.futures # for loading dataframes in parallel
+import concurrent.futures         # for parallel file loading
 
-# Fix the import path for log_config
-import sys
-import os
-# Add the parent directory to sys.path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from log_config import setup_logger, get_logger # logging handlers.
+# Modification: Add project root to sys.path so that we can import from src
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+sys.path.append(project_root)
+from src.backtesting import backtest_model
+from src.log_config import setup_logger, get_logger
 
-# logs will be saved in a file called app.log
 setup_logger(log_file_path="app.log")
 logger = get_logger()
+
 #############################################
 # Modification: TSDataSampler for Efficient Mini-Batching
 #############################################
@@ -72,14 +66,14 @@ class TSDataSampler(Sampler):
         return (len(self.data_source) + self.batch_size - 1) // self.batch_size
 
 #############################################
-# 1. Alpha158-inspired & Market-Wide Feature Computations (unchanged)
+# 1. Alpha158-inspired & Market-Wide Feature Computations  
 #############################################
 
 def compute_returns(series):
     return series.pct_change()
 
 def compute_regression_features(df, window=30):
-    df["stock_return"] = compute_returns(df["closing_price"])  # Modification: Use closing_price
+    df["stock_return"] = compute_returns(df["closing_price"])   
     df["market_return"] = df["stock_return"].rolling(window=window, min_periods=window).mean()
     beta_list, rsqr_list, resi_list = [], [], []
     for i in range(len(df)):
@@ -155,9 +149,8 @@ def compute_alpha158_features(df):
     return df
 
 #############################################
-# 2. Dataset & Model Definitions (adj per-stock normalization)
+# 2. Dataset & Model Definitions (multi-stock)
 #############################################
-
 class StockDataset(Dataset):
     def __init__(self, df, seq_length=30, feature_columns=None, target_column="closing_price"):
         self.seq_length = seq_length
@@ -166,7 +159,7 @@ class StockDataset(Dataset):
             self.feature_columns = feature_columns if feature_columns else df.drop(columns=non_feature_cols).columns.tolist()
         else:
             self.feature_columns = feature_columns if feature_columns else df.drop(columns=["timestamp", "closing_price"]).columns.tolist()
-        self.data = df.sort_values("timestamp").reset_index(drop=True)
+        self.data = df.sort_values(["company", "timestamp"]).reset_index(drop=True)
         self.features = self.data[self.feature_columns].values
         self.targets = self.data[target_column].values
 
@@ -192,11 +185,28 @@ class LSTMModel(nn.Module):
         out = self.fc(out[:, -1, :])
         return out
 
-#############################################
-# 3. HP Opt with Optuna  
-#############################################
+# New Transformer-Based Model Implementation
+class TransformerModel(nn.Module):
+    def __init__(self, input_size, d_model=64, nhead=4, num_layers=2, dropout=0.1, output_size=1):
+        super(TransformerModel, self).__init__()
+        self.input_linear = nn.Linear(input_size, d_model)
+        encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dropout=dropout)
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        self.fc = nn.Linear(d_model, output_size)
 
-def objective(trial, train_loader, input_size):
+    def forward(self, x):
+        # x shape: [batch, seq_length, input_size]
+        x = self.input_linear(x)  # [batch, seq_length, d_model]
+        x = x.transpose(0, 1)  # Transformer expects [seq_length, batch, d_model]
+        x = self.transformer_encoder(x)
+        out = x[-1, :, :]  # take output from last time step
+        out = self.fc(out)
+        return out
+
+#############################################
+# 3. Optuna
+#############################################
+def objective(trial, train_loader, input_size, model_type="LSTM"):
     seq_length = trial.suggest_int("seq_length", 30, 90)
     hidden_size = trial.suggest_int("hidden_size", 32, 128)
     num_layers = trial.suggest_int("num_layers", 1, 3)
@@ -205,7 +215,12 @@ def objective(trial, train_loader, input_size):
     num_epochs = 10
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = LSTMModel(input_size, hidden_size, num_layers, dropout).to(device)
+    
+    if model_type == "LSTM":
+        model = LSTMModel(input_size, hidden_size, num_layers, dropout).to(device)
+    else:
+        model = TransformerModel(input_size, d_model=hidden_size, nhead=4, num_layers=num_layers, dropout=dropout).to(device)
+        
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
@@ -228,12 +243,13 @@ def objective(trial, train_loader, input_size):
             raise optuna.exceptions.TrialPruned()
     return epoch_loss
 
-def train_final_model(train_loader, input_size, best_params, num_epochs=20):
+def train_final_model(train_loader, input_size, best_params, num_epochs=20, model_type="LSTM"):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = LSTMModel(input_size,
-                      best_params["hidden_size"],
-                      best_params["num_layers"],
-                      best_params["dropout"]).to(device)
+    if model_type == "LSTM":
+        model = LSTMModel(input_size, best_params["hidden_size"], best_params["num_layers"], best_params["dropout"]).to(device)
+    else:
+        model = TransformerModel(input_size, d_model=best_params["hidden_size"], nhead=4, num_layers=best_params["num_layers"], dropout=best_params["dropout"]).to(device)
+        
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=best_params["learning_rate"])
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=3)
@@ -284,7 +300,7 @@ def evaluate_model(model, data_loader):
     return mse, rmse, r2, mape, ic, ric
 
 #############################################
-# train-val-test split (80/10/10)
+# 4. train-val-test 80/10/10
 #############################################
 def train_val_test_split_ts(df, train_size=0.8, val_size=0.1, test_size=0.1):
     df = df.sort_values("timestamp").reset_index(drop=True)
@@ -297,11 +313,10 @@ def train_val_test_split_ts(df, train_size=0.8, val_size=0.1, test_size=0.1):
     return train_df, val_df, test_df
 
 #############################################
-# 4. Main Pipeline: Robust Validation, Multi-Stock 
+# 5. Main Pipeline: multi-stock training with model selection
 #############################################
-
 def main():
-    logger.info("Starting Alpha158 enhanced pipeline")
+    logger.info("Starting Alpha158 enhanced pipeline for multi-stock training")
     # Load raw extracted stock files with company info
     raw_path = "data/raw/korean_stock_extracted/"
     file_pattern = os.path.join(raw_path, "*_stock_data.csv")
@@ -315,19 +330,15 @@ def main():
     def load_file(file_path):
         logger.info(f"Loading file: {file_path}")
         return pd.read_csv(file_path, parse_dates=["timestamp"])
-    # load files in parallel 
-    # use concurrent futures because it's an I/O operation
-    df_list = []
+    
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
         df_list = list(executor.map(load_file, file_list))
     df_raw = pd.concat(df_list, ignore_index=True)
     logger.info(f"Loaded raw data from {len(file_list)} files; combined shape: {df_raw.shape}")
     print(f"Loaded raw data from {len(file_list)} files; combined shape: {df_raw.shape}")
-    del df_list # clean up memory
+    del df_list
 
     logger.info("Processing data per company")
-    
-    # Process data per company using compute_alpha158_features
     df_processed_list = []
     for company, group in df_raw.groupby("company"):
         group = group.sort_values("timestamp").reset_index(drop=True)
@@ -336,8 +347,8 @@ def main():
         df_processed_list.append(group)
     df_processed = pd.concat(df_processed_list, ignore_index=True)
     print(f"After processing per company, shape: {df_processed.shape}")
-    
-    # Per-stock normalization: apply scaling per company
+
+    # Per-stock normalization: apply scaling per company using swifter
     def scale_group(group):
         all_cols = group.columns.tolist()
         non_feature_cols = ["timestamp", "closing_price", "company"]
@@ -356,17 +367,12 @@ def main():
     df_scaled.to_csv(scaled_csv, index=False)
     print(f"Scaled dataset saved to {scaled_csv}")
 
-    # Progressive Training: choose one company to train first
-    company_to_train = df_scaled["company"].unique()[0]
-    df_company = df_scaled[df_scaled["company"] == company_to_train].copy()
-    print(f"Training on company: {company_to_train}, shape: {df_company.shape}")
-    
-    # Modification: Split into Train (80%), Validation (10%), and Test (10%)
-    train_df, val_df, test_df = train_val_test_split_ts(df_company, train_size=0.8, val_size=0.1, test_size=0.1)
-    print(f"Train shape: {train_df.shape}, Val shape: {val_df.shape}, Test shape: {test_df.shape}")
+    # Use all stocks for multi-stock training
+    df_multi = df_scaled.copy()
+    train_df, val_df, test_df = train_val_test_split_ts(df_multi, train_size=0.8, val_size=0.1, test_size=0.1)
+    print(f"Multi-stock Train shape: {train_df.shape}, Val shape: {val_df.shape}, Test shape: {test_df.shape}")
 
-    # Prepare training, validation, and test datasets
-    feature_columns = [col for col in df_company.columns if col not in ["timestamp", "closing_price", "company"]]
+    feature_columns = [col for col in df_multi.columns if col not in ["timestamp", "closing_price", "company"]]
     seq_length = 30
     train_dataset = StockDataset(train_df, seq_length=seq_length, feature_columns=feature_columns, target_column="closing_price")
     val_dataset = StockDataset(val_df, seq_length=seq_length, feature_columns=feature_columns, target_column="closing_price")
@@ -380,28 +386,42 @@ def main():
     test_loader = DataLoader(test_dataset, batch_sampler=test_sampler)
     input_size = len(feature_columns)
 
-    # Hyperparameter optimization using Optuna on the training set
-    study = optuna.create_study(direction="minimize")
-    study.optimize(lambda trial: objective(trial, train_loader, input_size), n_trials=10)
-    print("Best hyperparameters:", study.best_params)
-    best_params = study.best_params
+    # Model selection: Optimize and train both LSTM and Transformer models
+    print("Optimizing LSTM...")
+    study_lstm = optuna.create_study(direction="minimize")
+    study_lstm.optimize(lambda trial: objective(trial, train_loader, input_size, model_type="LSTM"), n_trials=10)
+    print("Best LSTM Hyperparameters:", study_lstm.best_params)
 
-    # Train final model on the training set
-    final_model = train_final_model(train_loader, input_size, best_params, num_epochs=20)
-    
-    # Evaluate on training, validation, and test sets
-    print("\nEvaluation on Training Set:")
-    evaluate_model(final_model, train_loader)
-    print("\nEvaluation on Validation Set:")
-    evaluate_model(final_model, val_loader)
-    print("\nEvaluation on Test Set:")
-    evaluate_model(final_model, test_loader)
+    print("Optimizing Transformer...")
+    study_trans = optuna.create_study(direction="minimize")
+    study_trans.optimize(lambda trial: objective(trial, train_loader, input_size, model_type="Transformer"), n_trials=10)
+    print("Best Transformer Hyperparameters:", study_trans.best_params)
 
-    # Modification: Use the separate backtesting module to backtest on the Test set.
-    print("\nBacktesting on Test Set:")
-    backtest_model(final_model, test_loader, initial_capital=1000000, threshold=0.0)
+    print("Training Final LSTM Model...")
+    final_lstm = train_final_model(train_loader, input_size, study_lstm.best_params, num_epochs=20, model_type="LSTM")
+    print("Training Final Transformer Model...")
+    final_trans = train_final_model(train_loader, input_size, study_trans.best_params, num_epochs=20, model_type="Transformer")
 
-    print("Enhanced evaluation pipeline complete. Next steps: expand multi-stock training, integrate real macroeconomic data, and explore advanced architectures.")
+    # Evaluate both models on training, validation, and test sets
+    print("\nEvaluation on Training Set (LSTM):")
+    evaluate_model(final_lstm, train_loader)
+    print("\nEvaluation on Validation Set (LSTM):")
+    evaluate_model(final_lstm, val_loader)
+    print("\nEvaluation on Test Set (LSTM):")
+    evaluate_model(final_lstm, test_loader)
+
+    print("\nEvaluation on Training Set (Transformer):")
+    evaluate_model(final_trans, train_loader)
+    print("\nEvaluation on Validation Set (Transformer):")
+    evaluate_model(final_trans, val_loader)
+    print("\nEvaluation on Test Set (Transformer):")
+    evaluate_model(final_trans, test_loader)
+
+    # Backtesting on Test Set using the best model (using Transformer for demonstration)
+    print("\nBacktesting on Test Set (Transformer):")
+    backtest_model(final_trans, test_loader, initial_capital=1000000, threshold=0.0)
+
+    print("Unified multi-stock training pipeline complete. Next steps: integrate real macroeconomic data, monitor model performance, and explore further advanced architectures.")
 
 if __name__ == "__main__":
     main()
