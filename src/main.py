@@ -16,7 +16,7 @@ from transformers import pipeline
 
 # --- Log Tracker ---
 logging.basicConfig(
-    filename="training.log",
+    filename="data/log/training.log",
     filemode="a",   
     level=logging.INFO,
     format="[%(asctime)s] %(levelname)s: %(message)s",
@@ -354,7 +354,7 @@ def objective(trial):
     num_epochs = 10  # for tuning, keep epochs lower
 
     # Load dataset
-    data_path = "data/processed/engineered_features.csv"
+    data_path = "data/interim/engineered_features.csv"
     dataset = StockDataset(data_path, seq_length=seq_length)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     
@@ -434,7 +434,7 @@ def main():
     
     raw_df = pd.read_csv(combined_csv, parse_dates=['timestamp'])
     engineered_df = feature_engineering_pipeline(raw_df)
-    engineered_csv = "data/processed/engineered_features.csv"
+    engineered_csv = "data/interim/engineered_features.csv"
     engineered_df.to_csv(engineered_csv, index=False)
     logging.info(f"Engineered features saved to {engineered_csv}")
     

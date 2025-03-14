@@ -9,15 +9,17 @@ Objective:
   - Evaluate using enhanced metrics including IC (Pearson) and RIC (Spearman).
 
 Modifications are marked with **"Modification:"** in comments.
+
+- Shift the closing_price by one row ahead
 """
 
 import os
 import sys
-import glob  # Modification: For loading multiple raw files
+import glob 
 import numpy as np
 import pandas as pd
 import matplotlib
-matplotlib.use("Agg")  # Non-interactive backend
+matplotlib.use("Agg")  
 import matplotlib.pyplot as plt
 import optuna
 import xgboost as xgb
@@ -29,7 +31,7 @@ from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_percenta
 from sklearn.linear_model import LinearRegression
 from scipy.stats import pearsonr, spearmanr
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
-# comment it out to process dataframes sequentially
+
 import ray
 ray.init(
     ignore_reinit_error=True,# this makes sure ray is initialized only once
@@ -40,15 +42,14 @@ import swifter # for parallel processing of dataframes
 # comment out until here to not use parallelization
 import concurrent.futures # for loading dataframes in parallel
 
-# Fix the import path for log_config
+
 import sys
 import os
-# Add the parent directory to sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from log_config import setup_logger, get_logger # logging handlers.
+from src.utils.log_config import setup_logger, get_logger # logging handlers.
 
-# logs will be saved in a file called app.log
-setup_logger(log_file_path="app.log")
+# save log
+setup_logger(log_file_path="log/app.log")
 logger = get_logger()
 #############################################
 # Modification: TSDataSampler for efficient mini-batching
@@ -343,12 +344,12 @@ def evaluate_model(model, data_loader):
 def main():
     logger.info("Starting Alpha158 enhanced pipeline")
     # Modification: Load raw extracted stock files with company info
-    raw_path = "data/raw/korean_stock_extracted/"
+    raw_path = "data/interim/korean_stock_extracted/"
     file_pattern = os.path.join(raw_path, "*_stock_data.csv")
     file_list = glob.glob(file_pattern)
     if not file_list:
-        logger.error("No extracted stock data files found in data/raw/korean_stock_extracted/")
-        sys.exit("Error: No extracted stock data files found in data/raw/korean_stock_extracted/")
+        logger.error("No extracted stock data files found in data/interim/korean_stock_extracted/")
+        sys.exit("Error: No extracted stock data files found in data/interim/korean_stock_extracted/")
     
     logger.info(f"Found {len(file_list)} stock data files")
     

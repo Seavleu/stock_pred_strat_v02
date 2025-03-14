@@ -3,7 +3,7 @@ Improved Training Framework for Korean Stock Price Prediction
 
 This script integrates dynamic feature selection, progressive training, and an enhanced
 transformer-based architecture to improve stock price forecasting for the Korean stock market.
-Data is loaded from individual company CSV files in 'data/raw/korean_stock_extracted/'.
+Data is loaded from individual company CSV files in 'data/interim/korean_stock_extracted/'.
 Adaptive scaling is performed at the company level, and the top (most volatile) company is used
 for progressive training. A placeholder for rolling-window SHAP-based feature selection is included.
 """

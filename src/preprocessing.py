@@ -1,15 +1,15 @@
 """
-Enhanced Evaluation Pipeline for Stock Price Prediction
+enhanced evaluation pipeline for stock price prediction
 
-Objective:
-  - Apply dynamic feature scaling:
-      * Normalize returns-based features (e.g., closing_price, Adj Close) using MinMax scaling to [-1, 1]
-      * Standardize technical indicators (e.g., highest_price, MA_5, etc.) using Z-score normalization
-  - Evaluate predictive signal strength using IC (Pearson correlation) and RIC (Spearman correlation)
-  - Integrate these new evaluation metrics into our training pipeline
+objective:
+  - apply dynamic feature scaling:
+      * normalize returns-based features (e.g., close, adj close) using minmax scaling to [-1, 1]
+      * standardize technical indicators (e.g., highest_price, MA_5, etc.) using z-score normalization
+  - evaluate predictive signal strength using ic (pearson correlation) and ric (spearman correlation)
+  - integrate these new evaluation metrics into our training pipeline
 
-Note: This script assumes that the dataset contains a single stock’s data. 
-For multi-stock data, per-stock normalization should be applied.
+note: this script assumes that the dataset contains a single stock’s data.
+for multi-stock data, per-stock normalization should be applied.
 """
 
 import os
@@ -29,11 +29,16 @@ from sklearn.preprocessing import MinMaxScaler, StandardScaler
 import optuna
 import xgboost as xgb
 
+#############################################
+# stock dataset for single-stock data (using "date" & target "future_avg_return")
+#############################################
 class StockDataset(Dataset):
-    def __init__(self, df, seq_length=30, feature_columns=None, target_column="closing_price"):
+    def __init__(self, df, seq_length=30, feature_columns=None, target_column="future_avg_return"):
         self.seq_length = seq_length
-        self.feature_columns = feature_columns if feature_columns else df.drop(columns=["timestamp", target_column]).columns.tolist()
-        self.data = df.sort_values("timestamp").reset_index(drop=True)
+        # exclude date and target columns from features
+        non_feature_cols = ["date", target_column]
+        self.feature_columns = feature_columns if feature_columns else df.drop(columns=non_feature_cols).columns.tolist()
+        self.data = df.sort_values("date").reset_index(drop=True)
         self.features = self.data[self.feature_columns].values
         self.targets = self.data[target_column].values
 
@@ -45,6 +50,9 @@ class StockDataset(Dataset):
         y = self.targets[idx + self.seq_length]
         return torch.tensor(x, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)
 
+#############################################
+# lstm model
+#############################################
 class LSTMModel(nn.Module):
     def __init__(self, input_size, hidden_size, num_layers, dropout, output_size=1):
         super(LSTMModel, self).__init__()
@@ -60,65 +68,39 @@ class LSTMModel(nn.Module):
         return out
 
 #############################################
-# 1. Dynamic Feature Scaling Functions
+# 1. dynamic feature scaling
 #############################################
-
 def scale_features(df, returns_features, technical_features):
     """
-    Scale returns-based features with MinMax scaling (-1, 1) and
-    technical indicators with Z-score normalization.
-    
-    Args:
-        df (DataFrame): Input dataset.
-        returns_features (list): Columns to scale with MinMax.
-        technical_features (list): Columns to standardize using Z-score.
-        
-    Returns:
-        DataFrame: Scaled dataset.
+    using minmax scaling, and standardize technical features using z-score
     """
     df_scaled = df.copy()
-    # scale returns-based features
     if returns_features:
         scaler_mm = MinMaxScaler(feature_range=(-1, 1))
         df_scaled[returns_features] = scaler_mm.fit_transform(df_scaled[returns_features])
-    # standardize technical features
     if technical_features:
         scaler_std = StandardScaler()
         df_scaled[technical_features] = scaler_std.fit_transform(df_scaled[technical_features])
     return df_scaled
 
 #############################################
-# 2. IC & RIC Calculation
+# 2. ic & ric calc 
 #############################################
-
 def calculate_ic_ric(y_true, y_pred):
-    """
-    Calculate the Information Coefficient (IC) and Rank Information Coefficient (RIC)
-    using Pearson and Spearman correlation respectively.
-    
-    Args:
-        y_true (array-like): True values.
-        y_pred (array-like): Predicted values.
-        
-    Returns:
-        ic (float): Pearson correlation coefficient.
-        ric (float): Spearman rank correlation coefficient.
-    """
     ic, _ = pearsonr(y_true, y_pred)
     ric, _ = spearmanr(y_true, y_pred)
     return ic, ric
 
 #############################################
-# 3. Training, Hyperparameter Optimization, and Evaluation (reuse existing functions)
+# 3. training, hyperparameter optimization, and evaluation
 #############################################
-
 def objective(trial, train_loader, input_size):
     seq_length = trial.suggest_int("seq_length", 30, 90)
     hidden_size = trial.suggest_int("hidden_size", 32, 128)
     num_layers = trial.suggest_int("num_layers", 1, 3)
     dropout = trial.suggest_float("dropout", 0.1, 0.5)
     learning_rate = trial.suggest_float("learning_rate", 1e-4, 1e-2, log=True)
-    num_epochs = 10  # for tuning
+    num_epochs = 10
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = LSTMModel(input_size, hidden_size, num_layers, dropout).to(device)
@@ -167,7 +149,7 @@ def train_final_model(train_loader, input_size, best_params, num_epochs=20):
             epoch_loss += loss.item() * x_batch.size(0)
         epoch_loss /= len(train_loader.dataset)
         scheduler.step(epoch_loss)
-        print(f"Final Training - Epoch [{epoch+1}/{num_epochs}], Loss: {epoch_loss:.6f}")
+        print(f"final training - epoch [{epoch+1}/{num_epochs}], loss: {epoch_loss:.6f}")
     return model
 
 def evaluate_model(model, data_loader):
@@ -181,68 +163,82 @@ def evaluate_model(model, data_loader):
             outputs = model(x_batch).squeeze()
             predictions.extend(outputs.cpu().numpy())
             actuals.extend(y_batch.cpu().numpy())
-    # remove any NaNs before calc metrics
     predictions = np.array(predictions)
     actuals = np.array(actuals)
     if np.isnan(predictions).any() or np.isnan(actuals).any():
-        raise ValueError("Evaluation data contains NaN values.")
+        raise ValueError("evaluation data contains nan values.")
     mse = mean_squared_error(actuals, predictions)
     rmse = np.sqrt(mse)
     r2 = r2_score(actuals, predictions)
     mape = mean_absolute_percentage_error(actuals, predictions)
-    print(f"Evaluation Metrics -> MSE: {mse:.4f}, RMSE: {rmse:.4f}, R2: {r2:.4f}, MAPE: {mape:.4f}")
-    # calc IC & RIC
+    print(f"evaluation metrics -> mse: {mse:.4f}, rmse: {rmse:.4f}, r2: {r2:.4f}, mape: {mape:.4f}")
     ic, ric = calculate_ic_ric(actuals, predictions)
-    print(f"Information Coefficient (IC): {ic:.4f}, Rank IC (RIC): {ric:.4f}")
+    print(f"information coefficient (ic): {ic:.4f}, rank ic (ric): {ric:.4f}")
     return mse, rmse, r2, mape, ic, ric
 
 #############################################
-# 4. Main Pipeline
+# 4. train-val-test split (80/10/10)
 #############################################
+def train_val_test_split_ts(df, train_size=0.8, val_size=0.1, test_size=0.1):
+    df = df.sort_values("date").reset_index(drop=True)
+    n = len(df)
+    train_end = int(n * train_size)
+    val_end = train_end + int(n * val_size)
+    train_df = df.iloc[:train_end].copy()
+    val_df = df.iloc[train_end:val_end].copy()
+    test_df = df.iloc[val_end:].copy()
+    return train_df, val_df, test_df
 
-def main(): 
-    enhanced_csv = "data/processed/alpha158_enhanced_features.csv"
+#############################################
+# 5. Main Pipeline
+#############################################
+def main():
+    enhanced_csv = "data/interim/refined_features.csv"
     if not os.path.exists(enhanced_csv) or os.path.getsize(enhanced_csv) == 0:
-        sys.exit(f"Error: {enhanced_csv} is missing or empty. Run the Alpha158-enhanced feature engineering pipeline first.")
-    df = pd.read_csv(enhanced_csv, parse_dates=["timestamp"])
-    print(f"Loaded {len(df)} rows from {enhanced_csv}.")
+        sys.exit(f"error: {enhanced_csv} is missing or empty. please run the feature engineering -> feature_refinement pipeline first.")
+    df = pd.read_csv(enhanced_csv, parse_dates=["date"])
+    print(f"loaded {len(df)} rows from {enhanced_csv}.")
 
-    # Define feature columns for scaling
-    # Assume returns-based features are: 'closing_price' and 'Adj Close'
-    # and the technical indicators are all others (excluding 'timestamp')
+    # if multiple stocks are present, filter to a single stock (for single-stock evaluation)
+    if "company" in df.columns:
+        companies = df["company"].unique()
+        print("found companies:", companies)
+        selected_company = companies[0]
+        print("using data for company:", selected_company)
+        df = df[df["company"] == selected_company].copy()
+
     all_cols = df.columns.tolist()
-    non_feature_cols = ["timestamp", "closing_price"]
+    non_feature_cols = ["date", "future_avg_return"]
     feature_cols = [col for col in all_cols if col not in non_feature_cols]
     
-    returns_features = ["Adj Close"] if "Adj Close" in feature_cols else []
-    technical_features = [col for col in feature_cols if col not in returns_features]
+    returns_features = []   
+    technical_features = feature_cols   
     
     # dynamic feature scaling
     df_scaled = scale_features(df, returns_features, technical_features)
-    scaled_csv = "data/processed/alpha158_enhanced_features_scaled.csv"
+    scaled_csv = "data/interim/refined_features_scaled.csv"
     df_scaled.to_csv(scaled_csv, index=False)
-    print(f"Scaled dataset saved to {scaled_csv}")
+    print(f"scaled dataset saved to {scaled_csv}")
 
-    # prepare
-    feature_columns = [col for col in df_scaled.columns if col not in ["timestamp", "closing_price"]]
+    # prepare dataset for training; target is future_avg_return
+    feature_columns = [col for col in df_scaled.columns if col not in ["date", "future_avg_return"]]
     seq_length = 30  
-    dataset = StockDataset(df_scaled, seq_length=seq_length, feature_columns=feature_columns, target_column="closing_price")
+    dataset = StockDataset(df_scaled, seq_length=seq_length, feature_columns=feature_columns, target_column="future_avg_return")
     train_loader = DataLoader(dataset, batch_size=64, shuffle=True)
     input_size = len(feature_columns)
     
-    # Optuna
+    # optuna
     study = optuna.create_study(direction="minimize")
     study.optimize(lambda trial: objective(trial, train_loader, input_size), n_trials=10)
-    print("Best hyperparameters:", study.best_params)
+    print("best hyperparameters:", study.best_params)
     best_params = study.best_params
     
-    # train + best hp
+    # train on training set
     final_model = train_final_model(train_loader, input_size, best_params, num_epochs=20)
     
-    # evaluate the model with IC & RIC calcs
     evaluate_model(final_model, train_loader)
     
-    print("Enhanced evaluation pipeline complete. The model now uses dynamic feature scaling and is evaluated with IC & RIC metrics.")
+    print("enhanced evaluation pipeline complete. the model now uses dynamic feature scaling and is evaluated with ic & ric metrics.")
 
 if __name__ == "__main__":
     main()

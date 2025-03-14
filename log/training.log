@@ -1,4 +1,4 @@
-[2025-03-04 11:46:04] INFO: Engineered features saved to data/processed/engineered_features.csv
+[2025-03-04 11:46:04] INFO: Engineered features saved to data/interim/engineered_features.csv
 [2025-03-04 11:47:20] INFO: Best hyperparameters:
 [2025-03-04 11:47:21] INFO: Final Training - Epoch [1/20], Loss: 0.448947
 [2025-03-04 11:47:22] INFO: Final Training - Epoch [2/20], Loss: 0.443838
@@ -23,7 +23,7 @@
 [2025-03-04 11:47:43] INFO: Final model saved to models/seq2seq_lstm_attention.pth
 [2025-03-04 11:47:44] INFO: MSE: 0.4414, RMSE: 0.6644, R2: 0.0037, MAPE: 1.2366
 [2025-03-04 11:47:44] INFO: Deployment pipeline can now be set up, do it later;D
-[2025-03-04 13:02:05] INFO: Engineered features saved to data/processed/engineered_features.csv
+[2025-03-04 13:02:05] INFO: Engineered features saved to data/interim/engineered_features.csv
 [2025-03-04 13:03:08] INFO: Best hyperparameters:
 [2025-03-04 13:03:09] INFO: Final Training - Epoch [1/20], Loss: 0.444567
 [2025-03-04 13:03:10] INFO: Final Training - Epoch [2/20], Loss: 0.444660
@@ -47,8 +47,8 @@
 [2025-03-04 13:03:30] INFO: Final Training - Epoch [20/20], Loss: 0.443018
 [2025-03-04 13:03:30] INFO: Final model saved to models/seq2seq_lstm_attention.pth
 [2025-03-04 13:03:31] INFO: MSE: 0.4210, RMSE: 0.6489, R2: 0.0499, MAPE: 1.2811
-[2025-03-04 16:37:26] INFO: Engineered features saved to data/processed/engineered_features.csv
-[2025-03-04 16:37:41] INFO: Engineered features saved to data/processed/engineered_features.csv
+[2025-03-04 16:37:26] INFO: Engineered features saved to data/interim/engineered_features.csv
+[2025-03-04 16:37:41] INFO: Engineered features saved to data/interim/engineered_features.csv
 [2025-03-04 16:38:53] INFO: Best hyperparameters:
 [2025-03-04 16:38:54] INFO: Final Training - Epoch [1/20], Loss: 0.448849
 [2025-03-04 16:38:56] INFO: Final Training - Epoch [2/20], Loss: 0.447345

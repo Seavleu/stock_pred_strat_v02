@@ -2,18 +2,34 @@ StockPredictionProject/
 ├── data/
 │   ├── raw/ 
 │   │   └── korean_stock_data.csv
+│   │   └── ticker.csv
 │   ├── interim/
-│   │   └── # Partially cleaned or transformed data
+│   │   └── korean_stock_extracted/
+│   │   └── engineered_features.csv
 │   └── processed/
-│       └── # Final preprocessed datasets ready for modeling
+│       └── korean_stock_data.csv
+│       └── refined_features.csv # Final preprocessed datasets ready for modeling
 ├── notebooks/
 │   ├── 01_exploratory_data_analysis.ipynb
 │   ├── 02_feature_engineering.ipynb
 │   └── 03_model_development.ipynb
+│   └── 04_company_ticker.ipynb
 ├── src/
-│   ├── data_ingestion.py
+│   ├── scripts/
+│   │   └──run_data_pipeline.sh
+│   │   └──run_training.sh
+│   │   └──run_inference.sh
+│   ├── archived/
+│   │   └── data_ingestion.py
+│   ├── tests/
+│   ├── scripts/
+│   ├── services/  #for api
 │   ├── data_cleaning.py
 │   ├── feature_engineering.py
+│   ├── feature_refinement.py
+│   ├── main.py
+│   ├── model_optimization.py
+│   ├── preprocessing.py #before it named Enhanced Evaluation Pipeline
 │   ├── model_training.py
 │   ├── model_inference.py
 │   └── utils/
@@ -21,16 +37,10 @@ StockPredictionProject/
 ├── models/
 │   └── # Saved models, checkpoints, or RL policies
 ├── configs/
-│   └── config.yaml
-├── tests/
-│   └── # Unit tests and integration tests
+│   └── config.yaml 
 ├── docker/
 │   ├── Dockerfile
 │   └── docker-compose.yml
-├── scripts/
-│   ├── run_data_pipeline.sh
-│   ├── run_training.sh
-│   └── run_inference.sh
 ├── requirements.txt
 ├── README.md
 └── .gitignore

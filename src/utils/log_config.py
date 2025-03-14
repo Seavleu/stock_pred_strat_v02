@@ -21,7 +21,7 @@ class JSONFormatter(logging.Formatter):
         return json.dumps(log_obj)
 
 def setup_logger(
-        log_file_path: str = "app.log",
+        log_file_path: str = "log/app.log",
         max_file_size: int = 10 * 1024 * 1024,
         backup_count: int = 10,
         log_level: int = logging.DEBUG

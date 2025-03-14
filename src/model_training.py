@@ -65,7 +65,7 @@ class LSTMModel(nn.Module):
 # -------------------------
 def train_model():
     # Paths and hyperparameters
-    data_path = "data/processed/engineered_features.csv"
+    data_path = "data/interim/engineered_features.csv"
     if not os.path.exists(data_path):
         raise FileNotFoundError(f"{data_path} not found. Please run the feature engineering pipeline first.")
     
