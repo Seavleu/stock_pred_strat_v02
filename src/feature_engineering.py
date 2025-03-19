@@ -1,253 +1,252 @@
 """
-enhanced evaluation pipeline for stock price prediction
+Feature Engineering Pipeline for KR Stock Market
 
-objective:
-  - apply dynamic feature scaling:
-      * normalize returns-based features (e.g., close, adj close) using minmax scaling to [-1, 1]
-      * standardize technical indicators (e.g., highest_price, MA_5, etc.) using z-score normalization
-  - evaluate predictive signal strength using ic (pearson correlation) and ric (spearman correlation)
-  - integrate these new evaluation metrics into our training pipeline
-
-note: this script assumes that the dataset contains a single stock’s data.
-for multi-stock data, per-stock normalization should be applied.
+- This script reads cleaned stock data from:
+    data/processed/korean_stock_data_cleaned.csv
+- It computes advanced technical indicators and Alpha158-inspired features,
+  generates lag features, applies denoising using the Savitzky–Golay filter, 
+  and creates target columns for multi-day prediction:
+      * next_day_close: closing price for the next day
+      * day_after_next_close: closing price for the day after next
+      * future_5day_close: closing price 5 days ahead
+- Finally, the script scales numeric features using RobustScaler and saves the enhanced dataset to:
+    data/processed/engineered_features.csv
 """
 
 import os
-import sys
 import numpy as np
 import pandas as pd
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
-from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_percentage_error
-from scipy.stats import pearsonr, spearmanr
-from sklearn.preprocessing import MinMaxScaler, StandardScaler
-import optuna
-import xgboost as xgb
-import concurrent.futures
-import ray
-import swifter
-
-# initialize ray (adjust number of cpus and memory as needed)
-ray.init(ignore_reinit_error=True, num_cpus=10, object_store_memory=4*10**9)
+from scipy.signal import savgol_filter
+from sklearn.preprocessing import RobustScaler, MinMaxScaler
+from sklearn.linear_model import LinearRegression
 
 #############################################
-# stock dataset for single-stock data (using "date" & target "future_avg_return")
+# Technical Indicator Functions
 #############################################
-class StockDataset(Dataset):
-    def __init__(self, df, seq_length=30, feature_columns=None, target_column="future_avg_return"):
-        self.seq_length = seq_length
-        non_feature_cols = ["date", target_column]
-        self.feature_columns = feature_columns if feature_columns else df.drop(columns=non_feature_cols).columns.tolist()
-        self.data = df.sort_values("date").reset_index(drop=True)
-        self.features = self.data[self.feature_columns].values
-        self.targets = self.data[target_column].values
+def compute_rsi(series, window=14):
+    delta = series.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.rolling(window=window, min_periods=window).mean()
+    avg_loss = loss.rolling(window=window, min_periods=window).mean()
+    rs = avg_gain / (avg_loss + 1e-10)
+    return 100 - (100 / (1 + rs))
 
-    def __len__(self):
-        return len(self.data) - self.seq_length
+def compute_macd(series, fast_period=12, slow_period=26, signal_period=9):
+    ema_fast = series.ewm(span=fast_period, adjust=False).mean()
+    ema_slow = series.ewm(span=slow_period, adjust=False).mean()
+    macd_line = ema_fast - ema_slow
+    signal_line = macd_line.ewm(span=signal_period, adjust=False).mean()
+    macd_hist = macd_line - signal_line
+    return macd_line, signal_line, macd_hist
 
-    def __getitem__(self, idx):
-        x = self.features[idx: idx + self.seq_length]
-        y = self.targets[idx + self.seq_length]
-        return torch.tensor(x, dtype=torch.float32), torch.tensor(y, dtype=torch.float32)
+def compute_bollinger_bands(series, window=20, num_std=2):
+    ma = series.rolling(window=window, min_periods=window).mean()
+    std = series.rolling(window=window, min_periods=window).std()
+    upper_band = ma + num_std * std
+    lower_band = ma - num_std * std
+    return ma, upper_band, lower_band
 
-#############################################
-# lstm model
-#############################################
-class LSTMModel(nn.Module):
-    def __init__(self, input_size, hidden_size, num_layers, dropout, output_size=1):
-        super(LSTMModel, self).__init__()
-        self.lstm = nn.LSTM(input_size, hidden_size, num_layers=num_layers, batch_first=True, dropout=dropout)
-        self.fc = nn.Linear(hidden_size, output_size)
+def compute_moving_averages(series, windows=[5, 10, 20, 50]):
+    ma_dict = {f"MA_{w}": series.rolling(window=w, min_periods=w).mean() for w in windows}
+    return pd.DataFrame(ma_dict)
 
-    def forward(self, x):
-        batch_size = x.size(0)
-        h0 = torch.zeros(self.lstm.num_layers, batch_size, self.lstm.hidden_size).to(x.device)
-        c0 = torch.zeros(self.lstm.num_layers, batch_size, self.lstm.hidden_size).to(x.device)
-        out, _ = self.lstm(x, (h0, c0))
-        out = self.fc(out[:, -1, :])
-        return out
+def compute_vwap(df, window=10):
+    typical_price = (df["high"] + df["low"] + df["close"]) / 3
+    vwap = (typical_price * df["volume"]).rolling(window=window, min_periods=window).sum() / \
+           df["volume"].rolling(window=window, min_periods=window).sum()
+    return vwap
 
-#############################################
-# 1. dynamic feature scaling
-#############################################
-def scale_features(df, returns_features, technical_features):
-    """
-    scale returns-based features with minmax scaling to [-1, 1] and
-    technical indicators with z-score normalization.
-    """
-    df_scaled = df.copy()
-    if returns_features:
-        scaler_mm = MinMaxScaler(feature_range=(-1, 1))
-        df_scaled[returns_features] = scaler_mm.fit_transform(df_scaled[returns_features])
-    if technical_features:
-        scaler_std = StandardScaler()
-        df_scaled[technical_features] = scaler_std.fit_transform(df_scaled[technical_features])
-    return df_scaled
+def compute_rate_of_change(series, window=1):
+    return series.pct_change(periods=window) * 100
 
-#############################################
-# 2. ic & ric calculation
-#############################################
-def calculate_ic_ric(y_true, y_pred):
-    ic, _ = pearsonr(y_true, y_pred)
-    ric, _ = spearmanr(y_true, y_pred)
-    return ic, ric
+def compute_volatility(series, windows=[5, 10, 20]):
+    vol_dict = {f"Volatility_{w}": series.rolling(window=w, min_periods=w).std() for w in windows}
+    return pd.DataFrame(vol_dict)
+
+def compute_momentum_features(series, windows=[5, 10, 20]):
+    momentum = pd.DataFrame(index=series.index)
+    for w in windows:
+        momentum[f"Momentum_{w}"] = series.diff(w)
+        momentum[f"Rolling_Max_{w}"] = series.rolling(window=w, min_periods=w).max()
+        momentum[f"Rolling_Min_{w}"] = series.rolling(window=w, min_periods=w).min()
+        momentum[f"Rank_{w}"] = series.rolling(window=w, min_periods=w).apply(lambda x: pd.Series(x).rank().iloc[-1])
+    return momentum
 
 #############################################
-# 3. training, hyperparameter optimization, and evaluation
+# Denoising & Lag Feature Generation
 #############################################
-def objective(trial, train_loader, input_size):
-    seq_length = trial.suggest_int("seq_length", 30, 90)
-    hidden_size = trial.suggest_int("hidden_size", 32, 128)
-    num_layers = trial.suggest_int("num_layers", 1, 3)
-    dropout = trial.suggest_float("dropout", 0.1, 0.5)
-    learning_rate = trial.suggest_float("learning_rate", 1e-4, 1e-2, log=True)
-    num_epochs = 10
+def apply_savgol_filter(series, window_length=11, polyorder=2):
+    if len(series) < window_length:
+        window_length = len(series) // 2 * 2 + 1
+    return savgol_filter(series, window_length=window_length, polyorder=polyorder)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = LSTMModel(input_size, hidden_size, num_layers, dropout).to(device)
-    criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-
-    model.train()
-    for epoch in range(num_epochs):
-        epoch_loss = 0.0
-        for x_batch, y_batch in train_loader:
-            x_batch, y_batch = x_batch.to(device), y_batch.to(device)
-            optimizer.zero_grad()
-            outputs = model(x_batch)
-            loss = criterion(outputs.squeeze(), y_batch)
-            loss.backward()
-            optimizer.step()
-            epoch_loss += loss.item() * x_batch.size(0)
-        epoch_loss /= len(train_loader.dataset)
-        if np.isnan(epoch_loss):
-            return float("inf")
-        trial.report(epoch_loss, epoch)
-        if trial.should_prune():
-            raise optuna.exceptions.TrialPruned()
-    return epoch_loss
-
-def train_final_model(train_loader, input_size, best_params, num_epochs=20):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = LSTMModel(input_size,
-                      best_params["hidden_size"],
-                      best_params["num_layers"],
-                      best_params["dropout"]).to(device)
-    criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=best_params["learning_rate"])
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=3)
-
-    for epoch in range(num_epochs):
-        model.train()
-        epoch_loss = 0.0
-        for x_batch, y_batch in train_loader:
-            x_batch, y_batch = x_batch.to(device), y_batch.to(device)
-            optimizer.zero_grad()
-            outputs = model(x_batch)
-            loss = criterion(outputs.squeeze(), y_batch)
-            loss.backward()
-            optimizer.step()
-            epoch_loss += loss.item() * x_batch.size(0)
-        epoch_loss /= len(train_loader.dataset)
-        scheduler.step(epoch_loss)
-        print(f"final training - epoch [{epoch+1}/{num_epochs}], loss: {epoch_loss:.6f}")
-    return model
-
-def evaluate_model(model, data_loader):
-    model.eval()
-    predictions = []
-    actuals = []
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    with torch.no_grad():
-        for x_batch, y_batch in data_loader:
-            x_batch, y_batch = x_batch.to(device), y_batch.to(device)
-            outputs = model(x_batch).squeeze()
-            predictions.extend(outputs.cpu().numpy())
-            actuals.extend(y_batch.cpu().numpy())
-    predictions = np.array(predictions)
-    actuals = np.array(actuals)
-    if np.isnan(predictions).any() or np.isnan(actuals).any():
-        raise ValueError("evaluation data contains nan values.")
-    mse = mean_squared_error(actuals, predictions)
-    rmse = np.sqrt(mse)
-    r2 = r2_score(actuals, predictions)
-    mape = mean_absolute_percentage_error(actuals, predictions)
-    print(f"evaluation metrics -> mse: {mse:.4f}, rmse: {rmse:.4f}, r2: {r2:.4f}, mape: {mape:.4f}")
-    ic, ric = calculate_ic_ric(actuals, predictions)
-    print(f"information coefficient (ic): {ic:.4f}, rank ic (ric): {ric:.4f}")
-    return mse, rmse, r2, mape, ic, ric
+def create_lag_features(df, column, lags=[1, 3, 5, 10, 20]):
+    for lag in lags:
+        df[f"{column}_lag_{lag}"] = df[column].shift(lag)
+    return df
 
 #############################################
-# 4. train-val-test split (80/10/10)
+# Alpha158-inspired & Market-Wide Feature Functions
 #############################################
-def train_val_test_split_ts(df, train_size=0.8, val_size=0.1, test_size=0.1):
-    df = df.sort_values("date").reset_index(drop=True)
-    n = len(df)
-    train_end = int(n * train_size)
-    val_end = train_end + int(n * val_size)
-    train_df = df.iloc[:train_end].copy()
-    val_df = df.iloc[train_end:val_end].copy()
-    test_df = df.iloc[val_end:].copy()
-    return train_df, val_df, test_df
+def compute_returns(series):
+    return series.pct_change()
+
+def compute_regression_features(df, window=30):
+    df["stock_return"] = compute_returns(df["close"])
+    df["market_return"] = df["stock_return"].rolling(window=window, min_periods=window).mean()
+    
+    beta_list, rsqr_list, resi_list = [], [], []
+    for i in range(len(df)):
+        if i < window:
+            beta_list.append(np.nan)
+            rsqr_list.append(np.nan)
+            resi_list.append(np.nan)
+        else:
+            y = df["stock_return"].iloc[i-window:i].values.reshape(-1,1)
+            X = df["market_return"].iloc[i-window:i].values.reshape(-1,1)
+            if np.isnan(X).any():
+                beta_list.append(np.nan)
+                rsqr_list.append(np.nan)
+                resi_list.append(np.nan)
+                continue
+            reg = LinearRegression().fit(X, y)
+            beta_list.append(reg.coef_[0][0])
+            rsqr_list.append(reg.score(X, y))
+            y_pred = reg.predict(X)
+            resi_list.append(np.std(y - y_pred))
+    df["BETA"] = beta_list
+    df["RSQR"] = rsqr_list
+    df["RESI"] = resi_list
+    df.drop(columns=["stock_return", "market_return"], inplace=True)
+    return df
+
+def compute_kbar_features(df):
+    low_col = "low" if "low" in df.columns else "Rolling_Min_5"
+    df["KMID"] = (df["high"] + df[low_col]) / 2
+    df["KLEN"] = df["high"] - df[low_col]
+    df["KSFT"] = df["close"] - df["KMID"]
+    return df
+
+def compute_enhanced_lag_features(df, column, windows=[3, 5, 10, 20]):
+    for w in windows:
+        df[f"{column}_lag_mean_{w}"] = df[column].rolling(window=w, min_periods=1).mean().shift(1)
+        df[f"{column}_lag_std_{w}"] = df[column].rolling(window=w, min_periods=1).std().shift(1)
+    return df
+
+def compute_vwap_variations(df):
+    if "volume" not in df.columns:
+        print("volume not found. Skipping VWAP variations.")
+        return df
+    low_col = "low" if "low" in df.columns else "Rolling_Min_5"
+    df["typical_price"] = (df["high"] + df[low_col] + df["close"]) / 3
+    df["vwap_typical"] = (df["typical_price"] * df["volume"]).cumsum() / df["volume"].cumsum()
+    if "open" in df.columns:
+        df["ohlc4_price"] = (df["open"] + df["high"] + df[low_col] + df["close"]) / 4
+        df["vwap_ohlc4"] = (df["ohlc4_price"] * df["volume"]).cumsum() / df["volume"].cumsum()
+    df["hlc3_price"] = (df["high"] + df[low_col] + df["close"]) / 3
+    df["vwap_hlc3"] = (df["hlc3_price"] * df["volume"]).cumsum() / df["volume"].cumsum()
+    df.drop(columns=["typical_price", "ohlc4_price", "hlc3_price"], errors="ignore", inplace=True)
+    return df
+
+def integrate_macroeconomic_data(df):
+    np.random.seed(42)
+    df["FX_rate"] = 1.1 + np.random.normal(0, 0.01, len(df))
+    df["KOSDAQ_trend"] = np.linspace(1000, 1200, len(df)) + np.random.normal(0, 5, len(df))
+    df["news_sentiment"] = np.random.uniform(-1, 1, len(df))
+    return df
+
+def compute_market_indicators(df, window_list=[5,10,20,30,60]):
+    np.random.seed(42)
+    df["KOSPI_close"] = 3000 + np.cumsum(np.random.normal(0, 10, len(df)))
+    df["KOSPI_volume"] = 1e6 + np.random.normal(0, 50000, len(df))
+    df["KOSPI_return"] = df["KOSPI_close"].pct_change()
+    for w in window_list:
+        df[f"KOSPI_return_mean_{w}"] = df["KOSPI_return"].rolling(window=w, min_periods=1).mean()
+        df[f"KOSPI_volume_mean_{w}"] = df["KOSPI_volume"].rolling(window=w, min_periods=1).mean()
+    return df
+
+def compute_alpha158_features(df):
+    # Compute Alpha158-inspired features
+    df = compute_regression_features(df, window=30)
+    df = compute_kbar_features(df)
+    df = compute_enhanced_lag_features(df, "close", windows=[3,5,10,20])
+    df = compute_vwap_variations(df)
+    df = integrate_macroeconomic_data(df)
+    df = compute_market_indicators(df)
+    return df
 
 #############################################
-# 5. Main Pipeline
+# Main Feature Engineering Pipeline
 #############################################
+def feature_engineering_pipeline(df):
+    df = df.copy()
+    # Ensure proper datetime format and sort by date
+    df["date"] = pd.to_datetime(df["date"])
+    df.sort_values("date", inplace=True)
+    
+    # Compute standard technical indicators based on close price
+    df["RSI"] = compute_rsi(df["close"])
+    macd_line, signal_line, macd_hist = compute_macd(df["close"])
+    df["MACD_Line"] = macd_line
+    df["Signal_Line"] = signal_line
+    df["MACD_Hist"] = macd_hist
+    bb_ma, bb_upper, bb_lower = compute_bollinger_bands(df["close"])
+    df["BB_MA"] = bb_ma
+    df["BB_Upper"] = bb_upper
+    df["BB_Lower"] = bb_lower
+    ma_df = compute_moving_averages(df["close"])
+    df = pd.concat([df, ma_df], axis=1)
+    
+    df["VWAP"] = compute_vwap(df, window=10)
+    df["ROC"] = compute_rate_of_change(df["close"], window=1)
+    vol_df = compute_volatility(df["close"], windows=[5,10,20])
+    df = pd.concat([df, vol_df], axis=1)
+    momentum_df = compute_momentum_features(df["close"], windows=[5,10,20])
+    df = pd.concat([df, momentum_df], axis=1)
+    
+    # Apply denoising to the close price using Savitzky-Golay filter
+    df["Close_Denoised"] = apply_savgol_filter(df["close"])
+    
+    # Create lag features for close price
+    df = create_lag_features(df, "close", lags=[1,3,5,10,20])
+    
+    # Compute Alpha158-inspired features and integrate market-wide indicators
+    df = compute_alpha158_features(df)
+    
+    # Create target columns for multi-day forecasting:
+    # next_day_close: closing price shifted by -1
+    # day_after_next_close: closing price shifted by -2
+    # future_5day_close: closing price shifted by -5
+    df["next_day_close"] = df["close"].shift(-1)
+    df["day_after_next_close"] = df["close"].shift(-2)
+    df["future_5day_close"] = df["close"].shift(-5)
+    
+    # Drop rows with NaNs from shifting operations
+    # df.dropna(inplace=True)
+    
+     # Replace infinite values and drop rows with NaN before scaling
+    df.replace([np.inf, -np.inf], np.nan, inplace=True)
+    df.dropna(inplace=True)
+
+    # Scale all numeric features using RobustScaler
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    scaler = RobustScaler()
+    df[numeric_cols] = scaler.fit_transform(df[numeric_cols])
+
+    return df
+
 def main():
-    enhanced_csv = "data/interim/refined_features.csv"
-    if not os.path.exists(enhanced_csv) or os.path.getsize(enhanced_csv) == 0:
-        sys.exit(f"error: {enhanced_csv} is missing or empty. please run the feature engineering -> feature_refinement pipeline first.")
-    df = pd.read_csv(enhanced_csv, parse_dates=["date"])
-    print(f"loaded {len(df)} rows from {enhanced_csv}.")
-
-    # if multiple stocks are present, filter to a single stock (for single-stock evaluation)
-    if "company" in df.columns:
-        companies = df["company"].unique()
-        print("found companies:", companies)
-        selected_company = companies[0]
-        print("using data for company:", selected_company)
-        df = df[df["company"] == selected_company].copy()
-
-    # define feature columns for scaling; exclude date and target future_avg_return
-    all_cols = df.columns.tolist()
-    non_feature_cols = ["date", "future_avg_return"]
-    feature_cols = [col for col in all_cols if col not in non_feature_cols]
+    input_csv = "data/processed/korean_stock_data_cleaned.csv"
+    output_csv = "data/processed/engineered_features.csv"
     
-    # define returns-based and technical features for scaling.
-    returns_features = []  # adjust if needed, e.g., ["close", "adj close"]
-    technical_features = feature_cols  # assume all remaining are technical
+    if not os.path.exists(input_csv) or os.path.getsize(input_csv) == 0:
+        raise FileNotFoundError(f"Error: {input_csv} is missing or empty. Run the cleaning pipeline first.")
     
-    # dynamic feature scaling
-    df_scaled = scale_features(df, returns_features, technical_features)
-    scaled_csv = "data/interim/refined_features_scaled.csv"
-    df_scaled.to_csv(scaled_csv, index=False)
-    print(f"scaled dataset saved to {scaled_csv}")
-
-    # prepare dataset for training; target is now future_avg_return
-    feature_columns = [col for col in df_scaled.columns if col not in ["date", "future_avg_return"]]
-    seq_length = 30  
-    dataset = StockDataset(df_scaled, seq_length=seq_length, feature_columns=feature_columns, target_column="future_avg_return")
-    train_loader = DataLoader(dataset, batch_size=64, shuffle=True)
-    input_size = len(feature_columns)
-    
-    # hyperparameter tuning using optuna
-    study = optuna.create_study(direction="minimize")
-    study.optimize(lambda trial: objective(trial, train_loader, input_size), n_trials=10)
-    print("best hyperparameters:", study.best_params)
-    best_params = study.best_params
-    
-    # train final model on training set
-    final_model = train_final_model(train_loader, input_size, best_params, num_epochs=20)
-    
-    # evaluate the model using ic & ric
-    evaluate_model(final_model, train_loader)
-    
-    print("enhanced evaluation pipeline complete. the model now uses dynamic feature scaling and is evaluated with ic & ric metrics.")
+    df = pd.read_csv(input_csv, parse_dates=["date"])
+    engineered_df = feature_engineering_pipeline(df)
+    engineered_df.to_csv(output_csv, index=False)
+    print(f"Engineered features saved to {output_csv}")
 
 if __name__ == "__main__":
     main()

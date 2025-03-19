@@ -4,61 +4,53 @@ import numpy as np
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 import re
 
-# def clean_company_name(company):
-#     """
-#     cleans the company name by removing common suffixes, punctuation, and unnecessary characters.
-#     """
-#     s = str(company).strip().lower()
-
-#     patterns_to_remove = [
-#         r'\s*\.co\.,?\s*ltd\.?$',
-#         r'\s*co\.,?\s*ltd\.?$',
-#         r'\s*\.$',
-#         r'^\s*"',
-#         r'"\s*$',
-#         r'\s*,?inc\.?$',
-#         r'\s*company limited$',
-#         r'\s*corporation$',
-#         r'\s*corp$',
-#         r'\s*crop$',
-#         r'\s*ltd$',
-#         r'\s*company$',
-#         r'\s*\.?company$',
-#         r'\s*,?company$',
-#         r'\s*,'
-#     ]
-#     for pattern in patterns_to_remove:
-#         s = re.sub(pattern, '', s, flags=re.IGNORECASE).strip()
-#     return s
+def clean_company_name(company):
+    """
+    cleans company names by:
+    - converting to lowercase
+    - removing common suffixes (e.g., "Co., Ltd.", "Ltd.", "Corporation", etc.)
+    - removing extra spaces and punctuation
+    """
+    company = str(company).strip().lower()
+    patterns_to_remove = [
+        r'\s*\.co\.,?\s*ltd\.?$',  
+        r'\s*co\.,?\s*ltd\.?$',    
+        r'\s*ltd[.]?$',            
+        r'\s*corporation$',        
+        r'\s*inc[.]?$',            
+        r'\s*corp$',               
+        r'\s*company$',            
+        r'\s*\.?company$',         
+        r'\s*,?company$',          
+        r'\s*co[.]?$',             
+        r'\s*,?$'                  
+    ]
+    for pattern in patterns_to_remove:
+        company = re.sub(pattern, '', company, flags=re.IGNORECASE).strip()
+    return company
 
 def filter_low_quality_stocks(df):
     """
     applies multiple quality checks to filter out unreliable stock data.
     """
-
     # drop companies with too many missing values (>30% missing price/volume data)
     df = df.dropna(thresh=int(df.shape[1] * 0.7))
-
     # drop stocks with low liquidity (less than 10,000 avg. daily volume)
     low_volume_companies = df.groupby("company")["volume"].mean()
     low_volume_companies = low_volume_companies[low_volume_companies < 10000].index
     df = df[~df["company"].isin(low_volume_companies)]
-
     # drop stocks with extreme price volatility (std dev > mean * 3)
     high_volatility_companies = df.groupby("company")["close"].std() > df.groupby("company")["close"].mean() * 3
     high_volatility_companies = high_volatility_companies[high_volatility_companies].index
     df = df[~df["company"].isin(high_volatility_companies)]
-
     # drop stocks with very low price movement (stagnant stocks)
     price_range = df.groupby("company")["close"].max() - df.groupby("company")["close"].min()
     stagnant_companies = price_range[price_range < df.groupby("company")["close"].mean() * 0.05].index
     df = df[~df["company"].isin(stagnant_companies)]
-
     # drop companies with frequent zero values (>30% of prices or volume are zero)
     zero_counts = (df[['open', 'high', 'low', 'close', 'volume']] == 0).sum()
     frequent_zero_companies = zero_counts[zero_counts > df.shape[0] * 0.3].index
     df = df[~df["company"].isin(frequent_zero_companies)]
-
     return df
 
 def clean_and_preprocess(csv_file, 
@@ -69,14 +61,13 @@ def clean_and_preprocess(csv_file,
     cleans missing values, removes duplicates, handles anomalies, and normalizes stock data.
     applies additional quality filters for high-reliability stock data.
     """
-
     # create directories if not exist
     os.makedirs(os.path.dirname(output_csv), exist_ok=True)
     os.makedirs(output_dir_extracted, exist_ok=True)
 
     df = pd.read_csv(csv_file, parse_dates=['timestamp'])
     df.columns = df.columns.str.strip()
-
+    
     # rename columns to match standard format
     column_mapping = {
         "timestamp": "date",
@@ -90,8 +81,7 @@ def clean_and_preprocess(csv_file,
     }
     df.rename(columns=column_mapping, inplace=True)
 
-    # clean company names
-    df["company"] = df["company"].astype(str) 
+    df["company"] = df["company"].astype(str).apply(clean_company_name)
     df = df[df["company"].notnull() & df["company"].str.strip().ne("")]
     df = df[~df["company"].str.lower().eq("unknown")]
 
@@ -119,7 +109,7 @@ def clean_and_preprocess(csv_file,
     # apply stock quality filters
     df = filter_low_quality_stocks(df)
 
-    # normalize numeric columns
+    # normalize numeric columns using minmaxscaler
     scale_cols = ["open", "high", "low", "close", "volume"]
     scaler = MinMaxScaler()
     df[scale_cols] = scaler.fit_transform(df[scale_cols])
@@ -158,13 +148,17 @@ def clean_and_preprocess(csv_file,
     df_norm.to_csv(output_csv, index=False)
     print(f"✅ saved cleaned data to {output_csv}")
 
-    # save cleaned data by company
+    # save cleaned data by ticker
     for company, group in df_norm.groupby("company"):
-        company_output_path = os.path.join(output_dir_extracted, f"{company.replace(' ', '_')}_cleaned.csv")
+        if 'ticker' in group.columns and group['ticker'].notnull().all():
+            filename = f"{group['ticker'].iloc[0]}.csv"
+        else:
+            filename = f"{company.replace(' ', '_')}_cleaned.csv"
+        company_output_path = os.path.join(output_dir_extracted, filename)
         group.to_csv(company_output_path, index=False)
 
-    print(f"✅ processed {df['company'].nunique()} companies.")
 
+    print(f"✅ processed {df['company'].nunique()} companies.")
     return df_norm
 
 def save_combined_clean_data(df, output_path="data/processed/korean_stock_combined_clean_data.csv"):
@@ -175,8 +169,49 @@ def save_combined_clean_data(df, output_path="data/processed/korean_stock_combin
     df.to_csv(output_path, index=False)
     print(f"✅ saved combined cleaned data to {output_path}")
 
+#############################################
+# Assign tickers to stock data
+#############################################
+def assign_tickers_to_stock_data(raw_data_path="data/processed/korean_stock_combined_clean_data.csv",
+                                 tickers_path="data/raw/kospi200_companies.csv",
+                                 output_path="data/mapping/korean_stock_data_with_ticker.csv"):
+    """
+    loads the cleaned combined stock data and ticker mapping, cleans company names in both,
+    maps tickers to each row, sorts the dataframe (unmatched companies at the bottom),
+    and saves the updated dataframe.
+    """
+    # Load combined cleaned data
+    df_stock = pd.read_csv(raw_data_path, parse_dates=["date"])
+    print(f"Loaded {len(df_stock)} rows from {raw_data_path}.")
+    
+    # Load ticker mapping
+    df_tickers = pd.read_csv(tickers_path, dtype={"ticker": str})
+    print(f"Loaded {len(df_tickers)} rows from {tickers_path}.")
+    
+    # Clean company names in both datasets
+    df_stock["company"] = df_stock["company"].apply(clean_company_name)
+    df_tickers["company"] = df_tickers["company"].apply(clean_company_name)
+    
+    # Create mapping dictionary: company -> ticker
+    ticker_dict = dict(zip(df_tickers["company"], df_tickers["ticker"]))
+    
+    # Map tickers to companies in stock data
+    df_stock["ticker"] = df_stock["company"].map(ticker_dict)
+    
+    # Sort: move unmatched companies (where ticker is null) to the bottom
+    df_stock = df_stock.sort_values(by="ticker", na_position="last").reset_index(drop=True)
+    
+    # Save the updated data
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    df_stock.to_csv(output_path, index=False)
+    print(f"✅ Ticker-matched data saved to: {output_path}")
+    return df_stock
+
 if __name__ == "__main__":
     input_csv = "data/raw/korean_stock_data.csv"
     cleaned_df = clean_and_preprocess(input_csv)
     save_combined_clean_data(cleaned_df)
     print(f"✅ final dataset contains {cleaned_df['company'].nunique()} high-quality companies.")
+    
+    # assign tickers after cleaning
+    assign_tickers_to_stock_data()

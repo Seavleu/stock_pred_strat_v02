@@ -7,6 +7,24 @@ computes shap values, aggregates the absolute shap values for each feature,
 and selects features that are consistently predictive under different market conditions.
 
 this approach helps detect shorter-term market changes, which is especially useful in high-volatility periods.
+
+**side note & benefit**
+- traditional models might use static features, assuming the same set of factors always influence stock price movement,
+however, market dynamic shift over time, meaning different indicators (volatility, momentum, volume) may gain or lose imortances
+└──> solution: rolling-window feature selection, will continuously evaluates which features matter the most (adapt to market trends 
+-> i need to create more macroeconomic feature for identify trends )
+- For example, if a hedge fund wants to optimize its stock trading algorithm, they use technical indicators (RSI, MACD, Bolinger Bands) 
+and fundamental data to predict. 
+
+- Dynamic Features Selection :
+    └──> The model will start to slides over recent data (e.g last 200d -> moving forward 50d/time) + each window will determine which indicators
+    currently matter most for prediction target value (returns price)
+    └──> If volatility and momentum indicators become more important due to market uncertainty, the model prioritize them
+    └──> If fundamental indicators become more relevant -> shift focus accordingly
+- Refine Trading Signal :
+    └──> The fund now trades based on the most up-to-date info
+    └──> Dynamically adapt to changing market conditions -> +profitability & reducing risk
+
 """
 
 import os
@@ -89,8 +107,7 @@ def plot_aggregated_shap(aggregated_shap, output_path="docs/dynamic_shap_importa
     plt.close()
     print(f"dynamic shap importance plot saved to '{output_path}'.")
 
-def main():
-    # load refined dataset (output from feature refinement pipeline)
+def main(): 
     refined_csv = "data/processed/refined_features.csv"
     if not os.path.exists(refined_csv) or os.path.getsize(refined_csv) == 0:
         sys.exit(f"error: {refined_csv} is missing or empty. please run the feature refinement pipeline first.")

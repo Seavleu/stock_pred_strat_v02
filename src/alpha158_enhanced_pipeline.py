@@ -342,14 +342,13 @@ def evaluate_model(model, data_loader):
 #############################################
 
 def main():
-    logger.info("Starting Alpha158 enhanced pipeline")
-    # Modification: Load raw extracted stock files with company info
-    raw_path = "data/interim/korean_stock_extracted/"
-    file_pattern = os.path.join(raw_path, "*_stock_data.csv")
+    logger.info("Starting Alpha158 enhanced pipeline") 
+    raw_path = "data/processed/korean_stock_extracted/"
+    file_pattern = os.path.join(raw_path, "*_cleaned.csv")
     file_list = glob.glob(file_pattern)
     if not file_list:
-        logger.error("No extracted stock data files found in data/interim/korean_stock_extracted/")
-        sys.exit("Error: No extracted stock data files found in data/interim/korean_stock_extracted/")
+        logger.error("No extracted stock data files found in data/processed/korean_stock_extracted/")
+        sys.exit("Error: No extracted stock data files found in data/processed/korean_stock_extracted/")
     
     logger.info(f"Found {len(file_list)} stock data files")
     
