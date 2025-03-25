@@ -1,46 +1,46 @@
 StockPredictionProject/
 ├── data/
-│   ├── raw/ 
-│   │   └── korean_stock_data.csv
-│   │   └── ticker.csv
-│   ├── interim/
-│   │   └── korean_stock_extracted/
-│   │   └── engineered_features.csv
-│   └── processed/
-│       └── korean_stock_data.csv
-│       └── refined_features.csv # Final preprocessed datasets ready for modeling
+│ ├── raw/
+│ │ └── korean_stock_data.csv
+│ │ └── ticker.csv
+│ ├── interim/
+│ │ └── korean_stock_extracted/
+│ │ └── engineered_features.csv
+│ └── processed/
+│ └── korean_stock_data.csv 
 ├── notebooks/
-│   ├── 01_exploratory_data_analysis.ipynb
-│   ├── 02_feature_engineering.ipynb
-│   └── 03_model_development.ipynb
-│   └── 04_company_ticker.ipynb
+│ ├── 01_exploratory_data_analysis.ipynb
+│ ├── 02_feature_engineering.ipynb
+│ └── 03_model_development.ipynb
+│ └── 04_company_ticker.ipynb
 ├── src/
-│   ├── scripts/
-│   │   └──run_data_pipeline.sh
-│   │   └──run_training.sh
-│   │   └──run_inference.sh
-│   ├── archived/
-│   │   └── data_ingestion.py
-│   ├── tests/
-│   ├── scripts/
-│   ├── services/  #for api
-│   ├── data_cleaning.py
-│   ├── feature_engineering.py
-│   ├── feature_refinement.py
-│   ├── main.py
-│   ├── model_optimization.py
-│   ├── preprocessing.py #before it named Enhanced Evaluation Pipeline
-│   ├── model_training.py
-│   ├── model_inference.py
-│   └── utils/
-│       └── # Helper modules, e.g., logging, custom metrics, etc.
+│ ├── scripts/
+│ │ └──run_data_pipeline.sh
+│ │ └──run_training.sh
+│ │ └──run_inference.sh
+│ ├── archived/
+│ │ └── data_ingestion.py
+│ ├── tests/
+│ ├── scripts/
+│ ├── services/ #for api
+│ ├── data_cleaning.py
+│ ├── feature_engineering.py 
+│ ├── dynamic_feature_selection.py # part of feature engineer right? -> using rolling-window shap analysis.
+│ ├── main.py
+│ ├── kospi200_equal_weighted_index.py
+│ ├── model_optimization.py
+│ ├── preprocessing.py #before it named Enhanced Evaluation Pipeline
+│ ├── model_training.py
+│ ├── model_inference.py
+│ └── utils/
+│ └── # Helper modules, e.g., logging, custom metrics, etc.
 ├── models/
-│   └── # Saved models, checkpoints, or RL policies
+│ └── # Saved models, checkpoints, or RL policies
 ├── configs/
-│   └── config.yaml 
+│ └── config.yaml
 ├── docker/
-│   ├── Dockerfile
-│   └── docker-compose.yml
+│ ├── Dockerfile
+│ └── docker-compose.yml
 ├── requirements.txt
 ├── README.md
 └── .gitignore

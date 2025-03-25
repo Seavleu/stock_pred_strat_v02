@@ -96,7 +96,7 @@ class StockDataset(Dataset):
         Args:
             df (DataFrame): DataFrame with engineered features.
             seq_length (int): Number of time steps in each sequence.
-            feature_columns (list): List of feature columns to use.
+            feature_columns (list): List of feature cols to use.
             target_column (str): Column name for the target.
         """
         self.seq_length = seq_length

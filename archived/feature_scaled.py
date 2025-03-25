@@ -1,23 +1,21 @@
 """
-multi-stock evaluation pipeline for stock price prediction
+enhanced evaluation pipeline for stock price prediction
 
 objective:
-  - load the engineered features for multiple stocks,
-  - apply per-stock normalization,
-  - split the data (80/10/10) preserving time order,
-  - train an lstm model (using future_avg_return as target),
-  - evaluate predictive performance with ic & ric,
-  - and run backtesting on the test set.
+  - apply dynamic feature scaling:
+      * normalize returns-based features (e.g., close, adj close) using minmax scaling to [-1, 1]
+      * standardize technical indicators (e.g., highest_price, MA_5, etc.) using z-score normalization
+  - evaluate predictive signal strength using ic (pearson correlation) and ric (spearman correlation)
+  - integrate these new evaluation metrics into our training pipeline
 
-note: this pipeline is intended for multi-stock data.
+note: this script assumes that the dataset contains a single stock’s data.
+for multi-stock data, per-stock normalization should be applied.
 """
 
 import os
 import sys
-import glob
 import numpy as np
 import pandas as pd
-import swifter
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -30,19 +28,16 @@ from scipy.stats import pearsonr, spearmanr
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 import optuna
 import xgboost as xgb
-from backtesting import backtest_model
 
 #############################################
-# stock dataset (multi-stock) using 'date' and target 'future_avg_return'
+# stock dataset for single-stock data (using "date" & target "future_avg_return")
 #############################################
 class StockDataset(Dataset):
     def __init__(self, df, seq_length=30, feature_columns=None, target_column="future_avg_return"):
         self.seq_length = seq_length
-        non_feature_cols = ["date", target_column, "company"]
-        if "company" in df.columns:
-            self.feature_columns = feature_columns if feature_columns else df.drop(columns=non_feature_cols).columns.tolist()
-        else:
-            self.feature_columns = feature_columns if feature_columns else df.drop(columns=["date", target_column]).columns.tolist()
+        # exclude date and target cols from features
+        non_feature_cols = ["date", target_column]
+        self.feature_columns = feature_columns if feature_columns else df.drop(columns=non_feature_cols).columns.tolist()
         self.data = df.sort_values("date").reset_index(drop=True)
         self.features = self.data[self.feature_columns].values
         self.targets = self.data[target_column].values
@@ -73,47 +68,23 @@ class LSTMModel(nn.Module):
         return out
 
 #############################################
-# multi-stock normalization function
+# 1. dynamic feature scaling
 #############################################
-def process_multi_stock_data(df):
+def scale_features(df, returns_features, technical_features):
     """
-    apply per-stock normalization to a multi-stock dataset.
-    for each company, normalize returns-based features (close, future_avg_return)
     using minmax scaling, and standardize technical features using z-score
-    
-    returns:
-        combined dataframe with per-stock normalization applied.
     """
-    def normalize_group(group):
-        group = group.sort_values("date").reset_index(drop=True) 
+    df_scaled = df.copy()
+    if returns_features:
         scaler_mm = MinMaxScaler(feature_range=(-1, 1))
-        group[['close', 'future_avg_return']] = scaler_mm.fit_transform(group[['close', 'future_avg_return']])
-        # normalize other numeric features (excluding date, company, close, future_avg_return)
-        numeric_cols = group.select_dtypes(include=[np.number]).columns.tolist()
-        technical_cols = [col for col in numeric_cols if col not in ['close', 'future_avg_return']]
-        if technical_cols:
-            scaler_std = StandardScaler()
-            group[technical_cols] = scaler_std.fit_transform(group[technical_cols])
-        return group
-
-    df_normalized = df.swifter.groupby("company", group_keys=False).apply(normalize_group).reset_index(drop=True)
-    return df_normalized
+        df_scaled[returns_features] = scaler_mm.fit_transform(df_scaled[returns_features])
+    if technical_features:
+        scaler_std = StandardScaler()
+        df_scaled[technical_features] = scaler_std.fit_transform(df_scaled[technical_features])
+    return df_scaled
 
 #############################################
-# train-validation-test split 80 10 10
-#############################################
-def train_val_test_split_ts(df, train_size=0.8, val_size=0.1, test_size=0.1):
-    df = df.sort_values("date").reset_index(drop=True)
-    n = len(df)
-    train_end = int(n * train_size)
-    val_end = train_end + int(n * val_size)
-    train_df = df.iloc[:train_end].copy()
-    val_df = df.iloc[train_end:val_end].copy()
-    test_df = df.iloc[val_end:].copy()
-    return train_df, val_df, test_df
-
-#############################################
-# ic & ric calc 
+# 2. ic & ric calc 
 #############################################
 def calculate_ic_ric(y_true, y_pred):
     ic, _ = pearsonr(y_true, y_pred)
@@ -121,7 +92,7 @@ def calculate_ic_ric(y_true, y_pred):
     return ic, ric
 
 #############################################
-# optuna objective function
+# 3. training, hyperparameter optimization, and evaluation
 #############################################
 def objective(trial, train_loader, input_size):
     seq_length = trial.suggest_int("seq_length", 30, 90)
@@ -155,9 +126,6 @@ def objective(trial, train_loader, input_size):
             raise optuna.exceptions.TrialPruned()
     return epoch_loss
 
-#############################################
-# training final model
-#############################################
 def train_final_model(train_loader, input_size, best_params, num_epochs=20):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = LSTMModel(input_size,
@@ -184,9 +152,6 @@ def train_final_model(train_loader, input_size, best_params, num_epochs=20):
         print(f"final training - epoch [{epoch+1}/{num_epochs}], loss: {epoch_loss:.6f}")
     return model
 
-#############################################
-# evaluation
-#############################################
 def evaluate_model(model, data_loader):
     model.eval()
     predictions = []
@@ -212,60 +177,68 @@ def evaluate_model(model, data_loader):
     return mse, rmse, r2, mape, ic, ric
 
 #############################################
-# main pipeline
+# 4. train-val-test split (80/10/10)
 #############################################
-def main(): 
-    engineered_csv = "data/processed/refined_features.csv"
-    if not os.path.exists(engineered_csv) or os.path.getsize(engineered_csv) == 0:
-        sys.exit(f"error: {engineered_csv} is missing or empty. please run the feature engineering pipeline first.")
-    df = pd.read_csv(engineered_csv, parse_dates=["date"])
-    print(f"loaded {len(df)} rows from {engineered_csv}.")
+def train_val_test_split_ts(df, train_size=0.8, val_size=0.1, test_size=0.1):
+    df = df.sort_values("date").reset_index(drop=True)
+    n = len(df)
+    train_end = int(n * train_size)
+    val_end = train_end + int(n * val_size)
+    train_df = df.iloc[:train_end].copy()
+    val_df = df.iloc[train_end:val_end].copy()
+    test_df = df.iloc[val_end:].copy()
+    return train_df, val_df, test_df
 
-    # apply per-stock normalization on multi-stock data
-    df_multi = process_multi_stock_data(df)
-    processed_csv = "data/processed/refined_features_multistock.csv"
-    df_multi.to_csv(processed_csv, index=False)
-    print(f"multi-stock normalized dataset saved to {processed_csv}")
+#############################################
+# 5. Main Pipeline
+#############################################
+def main():
+    enhanced_csv = "data/interim/refined_features.csv"
+    if not os.path.exists(enhanced_csv) or os.path.getsize(enhanced_csv) == 0:
+        sys.exit(f"error: {enhanced_csv} is missing or empty. please run the feature engineering -> feature_refinement pipeline first.")
+    df = pd.read_csv(enhanced_csv, parse_dates=["date"])
+    print(f"loaded {len(df)} rows from {enhanced_csv}.")
+
+    # if multiple stocks are present, filter to a single stock (for single-stock evaluation)
+    if "company" in df.columns:
+        companies = df["company"].unique()
+        print("found companies:", companies)
+        selected_company = companies[0]
+        print("using data for company:", selected_company)
+        df = df[df["company"] == selected_company].copy()
+
+    all_cols = df.columns.tolist()
+    non_feature_cols = ["date", "future_avg_return"]
+    feature_cols = [col for col in all_cols if col not in non_feature_cols]
     
-    train_df, val_df, test_df = train_val_test_split_ts(df_multi, train_size=0.8, val_size=0.1, test_size=0.1)
-    print(f"multi-stock train shape: {train_df.shape}, val shape: {val_df.shape}, test shape: {test_df.shape}")
+    returns_features = []   
+    technical_features = feature_cols   
     
-    # define feature columns (exclude date, future_avg_return, company)
-    feature_columns = [col for col in df_multi.columns if col not in ["date", "future_avg_return", "company"]]
-    seq_length = 30
-    train_dataset = StockDataset(train_df, seq_length=seq_length, feature_columns=feature_columns, target_column="future_avg_return")
-    val_dataset = StockDataset(val_df, seq_length=seq_length, feature_columns=feature_columns, target_column="future_avg_return")
-    test_dataset = StockDataset(test_df, seq_length=seq_length, feature_columns=feature_columns, target_column="future_avg_return")
-    
-    batch_size = 64
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    # dynamic feature scaling
+    df_scaled = scale_features(df, returns_features, technical_features)
+    scaled_csv = "data/interim/refined_features_scaled.csv"
+    df_scaled.to_csv(scaled_csv, index=False)
+    print(f"scaled dataset saved to {scaled_csv}")
+
+    # prepare dataset for training; target is future_avg_return
+    feature_columns = [col for col in df_scaled.columns if col not in ["date", "future_avg_return"]]
+    seq_length = 30  
+    dataset = StockDataset(df_scaled, seq_length=seq_length, feature_columns=feature_columns, target_column="future_avg_return")
+    train_loader = DataLoader(dataset, batch_size=64, shuffle=True)
     input_size = len(feature_columns)
     
-    # hyperparameter tuning using optuna on training set
-    print("optimizing hyperparameters using optuna...")
+    # optuna
     study = optuna.create_study(direction="minimize")
     study.optimize(lambda trial: objective(trial, train_loader, input_size), n_trials=10)
     print("best hyperparameters:", study.best_params)
     best_params = study.best_params
     
-    # train final model on training set
+    # train on training set
     final_model = train_final_model(train_loader, input_size, best_params, num_epochs=20)
     
-    # evaluate on train, validation, and test sets
-    print("\nevaluation on training set:")
     evaluate_model(final_model, train_loader)
-    print("\nevaluation on validation set:")
-    evaluate_model(final_model, val_loader)
-    print("\nevaluation on test set:")
-    evaluate_model(final_model, test_loader)
     
-    # backtesting on test set using the final model
-    print("\nbacktesting on test set:")
-    backtest_model(final_model, test_loader, initial_capital=1000000, threshold=0.0)
-    
-    print("unified multi-stock training pipeline complete. next steps: integrate real macroeconomic data, monitor model performance, and explore further advanced architectures.")
+    print("enhanced evaluation pipeline complete. the model now uses dynamic feature scaling and is evaluated with ic & ric metrics.")
 
 if __name__ == "__main__":
     main()

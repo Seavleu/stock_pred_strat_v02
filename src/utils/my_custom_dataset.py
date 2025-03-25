@@ -7,7 +7,7 @@ from torch.utils.data import Dataset
 class MyCustomDataset(Dataset):
     """
     A minimal custom dataset to load your time-series data from a CSV file.
-    Adjust the code to match your columns (X) and target (y).
+    Adjust the code to match your cols (X) and target (y).
     """
     def __init__(self, csv_file, seq_length=30):
         super().__init__()
@@ -17,7 +17,7 @@ class MyCustomDataset(Dataset):
         # Example: Suppose your refined CSV has columns: [date, future_avg_return, share, open, ...]
         # We want to treat 'future_avg_return' as the target, and everything else as features (minus 'date').
 
-        # 1. Drop non-feature columns you don't want in X
+        # 1. Drop non-feature cols you don't want in X
         df_features = self.df.drop(columns=["date", "future_avg_return"])
         self.X_all = df_features.values  # shape: [num_samples, num_features]
         

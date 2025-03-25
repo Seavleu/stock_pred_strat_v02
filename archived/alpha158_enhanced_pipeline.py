@@ -3,7 +3,7 @@ Alpha158-Enhanced Pipeline for Korean Stock Prediction with Market Awareness and
 
 Objective:
   - Dynamically select and scale features (using per-stock normalization).
-  - Integrate market-wide indicators (VWAP variations, KOSPI trends, macroeconomic factors).
+  - Integrate market-wide indicators (VWAP variations, KOSPI trends, macroeconomic factors). (remove all indicator we had it in the featurer engineering already)
   - Support a progressive training strategy (starting with one stock, later expanding).
   - Retain our LSTM Seq2Seq + Attention model (or consider Transformer-based models for multi-stock scenarios).
   - Evaluate using enhanced metrics including IC (Pearson) and RIC (Spearman).

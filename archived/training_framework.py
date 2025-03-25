@@ -35,7 +35,7 @@ def load_company_data(data_dir="data/raw/korean_stock_extracted"):
     Compute volatility for each company (using standard deviation of daily returns).
     Return a dictionary mapping company name to its DataFrame and select the company with highest volatility.
     """
-    files = glob.glob(os.path.join(data_dir, "*_stock_data.csv"))
+    files = glob.glob(os.path.join(data_dir, "*_cleaned.csv"))
     if not files:
         sys.exit(f"No stock data files found in {data_dir}.")
     
@@ -43,11 +43,11 @@ def load_company_data(data_dir="data/raw/korean_stock_extracted"):
     volatility_scores = {}
     
     for file in files:
-        df = pd.read_csv(file, parse_dates=["timestamp"])
+        df = pd.read_csv(file, parse_dates=["date"])
         # Ensure data is sorted
-        df.sort_values("timestamp", inplace=True)
+        df.sort_values("date", inplace=True)
         # Compute daily returns and volatility as std deviation of returns
-        df["return"] = df["closing_price"].pct_change()
+        df["return"] = df["close"].pct_change()
         vol = df["return"].std()
         # Extract company name from file name
         company_name = os.path.basename(file).replace("_stock_data.csv", "")
@@ -62,7 +62,7 @@ def load_company_data(data_dir="data/raw/korean_stock_extracted"):
 
 def adaptive_scaling(df):
     """
-    Apply RobustScaler to numeric columns on a per-company basis.
+    Apply RobustScaler to numeric cols on a per-company basis.
     Returns a DataFrame with scaled numeric features.
     """
     scaler = RobustScaler()
@@ -85,33 +85,33 @@ def dynamic_feature_selection(df, window_size=30):
     
     Expected features might include:
       - 'Adj Close', 'highest_price', 'Rolling_Max_5', 'Rolling_Min_5',
-        'MA_5', 'MA_50', 'BB_Lower', 'closing_price_lag_3'
+        'MA_5', 'MA_50', 'BB_Lower', 'close_lag_3'
     """
     # Here we assume these 8 features were refined previously.
     selected_features = ['Adj Close', 'highest_price', 'Rolling_Max_5', 'Rolling_Min_5',
-                         'MA_5', 'MA_50', 'BB_Lower', 'closing_price_lag_3']
+                         'MA_5', 'MA_50', 'BB_Lower', 'close_lag_3']
     # Ensure the features exist in df; if not, use available ones.
     available_features = [f for f in selected_features if f in df.columns]
     print("Dynamically selected features:", available_features)
-    return df[["timestamp", "closing_price"] + available_features]
+    return df[["date", "close"] + available_features]
 
 # -------------------------
 # Custom Dataset for Time-Series Data
 # -------------------------
 
 class StockDataset(Dataset):
-    def __init__(self, df, seq_length=90, feature_columns=None, target_column="closing_price"):
+    def __init__(self, df, seq_length=90, feature_columns=None, target_column="close"):
         """
         Args:
             df (DataFrame): DataFrame with selected features.
             seq_length (int): Number of time steps in each sequence.
-            feature_columns (list): List of feature columns to use.
+            feature_columns (list): List of feature cols to use.
             target_column (str): Column name for the target.
         """
         self.seq_length = seq_length
-        # If not provided, all columns except timestamp and target are features.
-        self.feature_columns = feature_columns if feature_columns else df.drop(columns=["timestamp", target_column]).columns.tolist()
-        self.data = df.sort_values("timestamp").reset_index(drop=True)
+        # If not provided, all cols except date and target are features.
+        self.feature_columns = feature_columns if feature_columns else df.drop(columns=["date", target_column]).columns.tolist()
+        self.data = df.sort_values("date").reset_index(drop=True)
         self.features = self.data[self.feature_columns].values
         self.targets = self.data[target_column].values
 
@@ -223,11 +223,11 @@ def main():
     # Step 4: Create time-series dataset (progressive training on one stock)
     # Use a longer sequence length (e.g., 90 days) as suggested by hyperparameter tuning
     seq_length = 90
-    # Use the selected features (excluding timestamp and target)
+    # Use the selected features (excluding date and target)
     feature_columns = df_selected.columns.tolist()
-    feature_columns.remove("timestamp")
-    feature_columns.remove("closing_price")
-    dataset = StockDataset(df_selected, seq_length=seq_length, feature_columns=feature_columns, target_column="closing_price")
+    feature_columns.remove("date")
+    feature_columns.remove("close")
+    dataset = StockDataset(df_selected, seq_length=seq_length, feature_columns=feature_columns, target_column="close")
     train_loader = DataLoader(dataset, batch_size=64, shuffle=True)
     input_size = len(feature_columns)
     

@@ -1,0 +1,52 @@
+data_paths:
+  raw_data: "data/raw/korean_stock_data.csv"
+  ticker_data: "data/raw/kospi200_companies.csv"
+
+rename_columns:
+  "opening_price": "open"
+  "highest_price": "high"
+  "lowest_price": "low"
+  "closing_price": "close"
+  "trading_volume": "volume"
+  "num_of_shares": "share"
+  "timestamp": "date"
+
+scaling:
+  numeric_columns: ["open", "high", "low", "close", "volume", "share"]
+  returns_columns: ["Close", "next_day_close", "day_after_next_close", "future_5day_close"]
+  technical_columns: ["MA_5", "MA_10", "RSI", "MACD", "MACD_signal", "MACD_hist", "BB_middle", "BB_upper", "BB_lower"]
+
+quality_filters:
+  min_avg_volume: 10000
+
+refinement:
+  corr_threshold: 0.99
+  mi_threshold: 0.1
+
+dynamic_selection:
+  window_size: 200
+  step_size: 50
+  select_ratio: 0.5
+  min_shap_importance: 0.01  # can adj based on data and experiments
+
+paths:
+  cleaned_data: "data/processed/korean_stock_data_cleaned.csv"
+  extracted_dir: "data/processed/korean_stock_extracted"
+  engineered_features: "data/interim/engineered_features.csv"
+  refined_features: "data/processed/refined_features.csv"
+  dynamic_features: "data/processed/dynamic_selected_features.csv"
+  scaled_features: "data/processed/engineered_features_scaled.csv"
+  final_model: "models/final_model.h5" 
+  model_lstm: models/trained_model.keras
+  model_lstm_att: models/trained_model_lstm_att.keras
+  metrics: "models/evaluation_metrics.pkl"
+  std_scaler: "models/std_scaler.pkl"
+  minmax_scaler: "models/minmax_scaler.pkl"
+  minmax_scaler_eval: "models/minmax_scaler_eval.pkl"
+  global_scaler: artifacts/global_scaler.pkl # save fitted MinMax scale, saved by joblip.dump(), later use it consistently on new/unseen data (inference or production), test set, reverse scalling
+
+training:
+  model_type: "transformer"  # choose "lstm" or "transformer"
+  sequence_length: 10
+  n_trials: 20
+  final_epochs: 30

@@ -1,110 +1,79 @@
-"""
-feature refinement script
-
-removes highly correlated features and drops low-mi (or low-shap) features
-from your selected feature set. saves the refined dataset for re-training
-and further model optimization.
-"""
-
-import os
-import sys
 import pandas as pd
 import numpy as np
 from sklearn.feature_selection import mutual_info_regression
 
-def remove_correlated_features(df, features, threshold=0.99):
-    corr_matrix = df[features].corr().abs()
-    upper_triangle = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+class FeatureRefiner:
+    def __init__(self, config):
+        self.config = config
     
-    to_drop = set()
-    for col in upper_triangle.columns:
-        for row in upper_triangle.index:
-            if upper_triangle.loc[row, col] > threshold:
-                to_drop.add(col)
-    refined_features = [f for f in features if f not in to_drop]
-    print(f"removed {len(to_drop)} highly correlated features: {to_drop}")
-    return refined_features
+    def load_engineered_features(self):
+        return pd.read_csv(self.config['paths']['engineered_features'])
+    
+    def drop_highly_correlated(self, df):
+        numeric_df = df.select_dtypes(include=[np.number])  # filter only numeric cols
+        corr_matrix = numeric_df.corr().abs()  # remove features with correlation above threshold (0.99)
+        upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+        to_drop = [column for column in upper.columns if any(upper[column] > self.config['refinement']['corr_threshold'])]
+        df = df.drop(columns=to_drop)
+        return df
+    
+    def drop_low_mutual_information(self, df, target_col):
+        features = df.select_dtypes(include=[np.number]).drop(columns=[target_col])
+        
+        # clean up inf or too large vals
+        features = features.replace([np.inf, -np.inf], np.nan)
+        target = df[target_col].replace([np.inf, -np.inf], np.nan)
 
-def remove_low_value_features(df, features, mi_scores, mi_cutoff=0.1, shap_importances=None, shap_cutoff=None):
-    """
-    remove features with low mi or low shap importance.
-    """
-    # filter by mutual information
-    keep_by_mi = [f for f in features if mi_scores.get(f, 0) >= mi_cutoff]
-    dropped_by_mi = set(features) - set(keep_by_mi)
-    print(f"dropped {len(dropped_by_mi)} features with mi < {mi_cutoff}: {dropped_by_mi}")
-    
-    # optionally filter by shap importance if provided
-    if shap_importances is not None and shap_cutoff is not None:
-        keep_by_shap = [f for f in keep_by_mi if shap_importances.get(f, 0) >= shap_cutoff]
-        dropped_by_shap = set(keep_by_mi) - set(keep_by_shap)
-        print(f"dropped {len(dropped_by_shap)} features with shap < {shap_cutoff}: {dropped_by_shap}")
-        final_features = keep_by_shap
-    else:
-        final_features = keep_by_mi
+        # fil NA values with 0
+        features = features.fillna(0)
+        target = target.fillna(0)
 
-    return final_features
+        mi = mutual_info_regression(features, target)
+        low_mi = features.columns[mi < self.config['refinement']['mi_threshold']]
+        df = df.drop(columns=low_mi) 
+        return df
+    
+    # def transform_target(self, df):
+    #     # create a combined target,  future average return
+    #     df['future_avg_return'] = ((df['next_day_close'] + df['day_after_next_close']) / 2) - df['close']
+    #     return df
+    
+    def transform_target(self, df):
+        # Sort by company & date to get correct temporal ordering
+        df = df.sort_values(by=['company', 'date']).reset_index(drop=True)
 
-def add_future_return_targets(df):
-    """
-    compute target returns:
-      - next_day_return = (close_{t+1} / close - 1)
-      - day_after_next_return = (close_{t+2} / close - 1)
-      - future_avg_return = average of the above two
-      
-    rows without sufficient future data are dropped.
-    """
-    df = df.copy()
-    epsilon = 1e-10
-    df['next_day_return'] = df['close'].shift(-1) / (df['close'] + epsilon) - 1
-    df['day_after_next_return'] = df['close'].shift(-2) / (df['close'] + epsilon) - 1
-    df['future_avg_return'] = (df['next_day_return'] + df['day_after_next_return']) / 2
-    # replace any inf values with nan and drop them
-    df.replace([np.inf, -np.inf], np.nan, inplace=True)
-    df.dropna(subset=['future_avg_return'], inplace=True)
-    return df
+        # Create future-close columns if they don't exist
+        if 'day_after_next_close' not in df.columns:
+            df['day_after_next_close'] = df.groupby('company')['close'].shift(-2)
+        if 'future_5day_close' not in df.columns:
+            df['future_5day_close'] = df.groupby('company')['close'].shift(-5)
 
-def main():
-    engineered_csv = "data/interim/engineered_features.csv"
-    if not os.path.exists(engineered_csv) or os.path.getsize(engineered_csv) == 0:
-        sys.exit(f"error: {engineered_csv} is missing or empty. please run model_optimization.py or feature selection first.")
+        if 'next_day_close' not in df.columns:
+            df['next_day_close'] = df.groupby('company')['close'].shift(-1)
+
+        # Compute future_avg_return
+        df['future_avg_return'] = ((df['next_day_close'] + df['day_after_next_close']) / 2) - df['close']
+        return df
+
     
-    df = pd.read_csv(engineered_csv, parse_dates=["date"])
-    print(f"loaded {len(df)} rows from {engineered_csv}.")
-    
-    # add target returns for multi-step forecasting (predicting next day and day after next return)
-    df = add_future_return_targets(df)
-    
-    # identify feature columns (exclude date, close, and target columns)
-    all_cols = df.columns.tolist()
-    non_feature_cols = ["date", "close", "next_day_return", "day_after_next_return", "future_avg_return"]
-    candidate_features = [c for c in all_cols if c not in non_feature_cols]
-    # keep only numeric columns for MI computation
-    feature_cols = [c for c in candidate_features if pd.api.types.is_numeric_dtype(df[c])]
-    
-    # compute mutual information scores using future_avg_return as target
-    X = df[feature_cols]
-    y = df["future_avg_return"]
-    mi_scores_array = mutual_info_regression(X, y)
-    mi_scores = pd.Series(mi_scores_array, index=X.columns).to_dict()
-    print("computed mutual information scores:")
-    for feature, score in mi_scores.items():
-        print(f"  {feature}: {score:.4f}")
-    
-    # remove highly correlated features using a relaxed threshold
-    refined_features = remove_correlated_features(df, feature_cols, threshold=0.99)
-    
-    # remove low-value features based on mi scores (using a cutoff of 0.1)
-    refined_features = remove_low_value_features(df, refined_features, mi_scores, mi_cutoff=0.1, shap_importances=None, shap_cutoff=None)
-    
-    print(f"final feature set has {len(refined_features)} features: {refined_features}")
-    
-    # create and save the final refined dataset with the new target
-    keep_cols = ["date", "future_avg_return"] + refined_features
-    refined_df = df[keep_cols].copy()
-    output_csv = "data/processed/refined_features.csv"
-    refined_df.to_csv(output_csv, index=False)
-    print(f"refined dataset saved to {output_csv}")
+    def save_refined_features(self, df):
+        path = self.config['paths']['refined_features']
+        df.to_csv(path, index=False)
+        return df
+    # we have to run it in order loaded data -> transform -> drop SHAP -> drop LMI on target_col -> save file
+    def run_refinement(self):
+        df = self.load_engineered_features()
+        df = self.transform_target(df) 
+        df = self.drop_highly_correlated(df)
+        df = self.drop_low_mutual_information(df, target_col='future_avg_return')
+        df = self.save_refined_features(df)
+        return df
+
 
 if __name__ == "__main__":
-    main()
+    import yaml
+    with open("configs/config.yaml", "r") as f:
+        config = yaml.safe_load(f)
+    refiner = FeatureRefiner(config)
+    refined_df = refiner.run_refinement()
+    print("Feature refinement completed. Refined data saved to:", config['paths']['refined_features'])
