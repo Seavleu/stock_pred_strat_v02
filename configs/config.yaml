@@ -37,6 +37,7 @@ paths:
   dynamic_features: "data/processed/dynamic_selected_features.csv"
   scaled_features: "data/processed/engineered_features_scaled.csv"
   model: "models/final_model.h5" 
+  model_testing: "models/testing_model.h5"
   model_lstm: models/trained_model.keras
   model_lstm_att: models/trained_model_lstm_att.keras
   metrics: "models/evaluation_metrics.pkl"
