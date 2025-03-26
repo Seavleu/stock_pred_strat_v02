@@ -95,7 +95,7 @@ class ModelTrainer:
         self.model.fit(X_train, y_train, validation_data=(X_val, y_val),
                        epochs=20, batch_size=32, callbacks=[early_stop])
 
-        self.model.save(self.config['paths']['model'])
+        self.model.save(self.config['paths']['model_lstm_att'])
         logging.info(f"Model saved to {self.config['paths']['model_lstm_att']}")
         return self.model
 

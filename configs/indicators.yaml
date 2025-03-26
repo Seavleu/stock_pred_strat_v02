@@ -1,0 +1,46 @@
+trend:
+  compute_SMA: true
+  SMA_window: 20
+  compute_EMA: true
+  EMA_window: 20
+  compute_MACD: true
+  compute_ADX: true
+  ADX_window: 14
+  compute_parabolic_SAR: true
+  compute_ichimoku: true
+  compute_CCI: true
+  CCI_window: 20
+
+momentum:
+  compute_RSI: true
+  RSI_window: 14
+  compute_stochastic: true
+  compute_MFI: true
+  MFI_window: 14
+  compute_williams_R: true
+  WilliamsR_window: 14
+
+volatility:
+  compute_bollinger: true
+  Bollinger_window: 20
+  Bollinger_std: 2
+  compute_ATR: true
+  ATR_window: 14
+  compute_donchian: true
+  Donchian_window: 20
+  compute_keltner: true
+  Keltner_window: 20
+  Keltner_multiplier: 1.5
+  compute_std_dev: true
+  StdDev_window: 20
+
+volume:
+  compute_OBV: true
+  compute_CMF: true
+  CMF_window: 20
+  compute_A/D: true
+  compute_VWAP: true
+
+support_resistance:
+  compute_pivot: true
+  compute_fibonacci: true

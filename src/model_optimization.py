@@ -24,7 +24,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
-from feature_engineering import feature_engineering_pipeline
+from src.feature_engineering.feature_engineering import feature_engineering_pipeline
 matplotlib.use("Agg")
 
 #############################################

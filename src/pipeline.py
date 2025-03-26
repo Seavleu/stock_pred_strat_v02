@@ -432,7 +432,7 @@ def main():
 
     # Ensure target column exists; add if missing
     if "future_avg_return" not in df.columns:
-        from feature_refinement import add_future_return_targets
+        from src.feature_engineering.feature_refinement import add_future_return_targets
         df = add_future_return_targets(df)
         logger.info("Computed future_avg_return target column.")
 

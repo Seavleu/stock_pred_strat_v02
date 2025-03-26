@@ -33,11 +33,6 @@ class FeatureRefiner:
         df = df.drop(columns=low_mi) 
         return df
     
-    # def transform_target(self, df):
-    #     # create a combined target,  future average return
-    #     df['future_avg_return'] = ((df['next_day_close'] + df['day_after_next_close']) / 2) - df['close']
-    #     return df
-    
     def transform_target(self, df):
         # Sort by company & date to get correct temporal ordering
         df = df.sort_values(by=['company', 'date']).reset_index(drop=True)

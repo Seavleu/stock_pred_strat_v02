@@ -4,42 +4,16 @@ This pipeline is scalable for both single-stock and multi-stock.
 import pandas as pd
 import numpy as np
 from scipy.signal import savgol_filter
+from technical_indicators import compute_all_indicators
 
 class FeatureEngineer:
     def __init__(self, config):
         self.config = config
+        self.indicators_config = indicators_config
 
     def load_cleaned_data(self):
         """Load the cleaned dataset."""
         return pd.read_csv(self.config['paths']['cleaned_data'])
-
-    def compute_technical_indicators(self, df):
-        # Moving Averages
-        df['ma_5'] = df['close'].rolling(window=5).mean()
-        df['ma_10'] = df['close'].rolling(window=10).mean()
-        
-        # RSI Calculation (14-period)
-        delta = df['close'].diff()
-        gain = delta.clip(lower=0)
-        loss = -delta.clip(upper=0)
-        avg_gain = gain.rolling(window=14, min_periods=14).mean()
-        avg_loss = loss.rolling(window=14, min_periods=14).mean()
-        rs = avg_gain / (avg_loss + 1e-10)  # add epsilon to avoid division by zero
-        df['rsi'] = 100 - (100 / (1 + rs))
-        
-        # MACD: EMA12 and EMA26
-        ema12 = df['close'].ewm(span=12, adjust=False).mean()
-        ema26 = df['close'].ewm(span=26, adjust=False).mean()
-        df['macd'] = ema12 - ema26
-        df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
-        df['macd_hist'] = df['macd'] - df['macd_signal']
-        
-        # Bollinger Bands (20-period)
-        df['bb_middle'] = df['close'].rolling(window=20).mean()
-        df['bb_std'] = df['close'].rolling(window=20).std()
-        df['bb_upper'] = df['bb_middle'] + 2 * df['bb_std']
-        df['bb_lower'] = df['bb_middle'] - 2 * df['bb_std']
-        return df
 
     def compute_alpha158_features(self, df):
         # Simple proxies for alpha158-inspired features
@@ -93,20 +67,28 @@ class FeatureEngineer:
 
     def run_feature_engineering(self):
         df = self.load_cleaned_data()
-        df = self.compute_technical_indicators(df)
         df = self.compute_alpha158_features(df)
         df = self.compute_candlestick_features(df)
         df = self.compute_lag_features(df)
         df = self.compute_additional_features(df)
         df = self.denoise_close(df)
         df = self.create_target_columns(df)
+        df = compute_all_indicators(df, self.indicators_config)
         df = self.save_engineered_features(df)
         return df
 
 if __name__ == "__main__":
-    import yaml
+    import yaml 
     with open("configs/config.yaml", "r") as f:
         config = yaml.safe_load(f)
+    with open("configs/indicators.yaml", "r") as f:
+        indicators_config = yaml.safe_load(f)
+    
+    # Pass both configurations to the FeatureEngineer
     fe = FeatureEngineer(config)
     engineered_df = fe.run_feature_engineering()
+    
+    # Pass the indicators_config to compute_all_indicators
+    engineered_df = compute_all_indicators(engineered_df, indicators_config)
+    
     print("Feature engineering completed. Engineered features saved to:", config['paths']['engineered_features'])

@@ -1,13 +1,41 @@
-# src/main.py
+# system logging & training orchestrator
 
 import pandas as pd
 import numpy as np
 import joblib
 import yaml
 import re
+import os
+import time
+import psutil
+import platform
+import GPUtil
+import logging
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.feature_selection import mutual_info_regression
 from scipy.signal import savgol_filter
+
+from src.lstm_transformer_model_training import run_training_pipeline
+
+# ----------------------------
+# Setup Logging
+# ----------------------------
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# ----------------------------
+# System Info Logging
+# ----------------------------
+def log_system_info():
+    logger.info("System Platform: %s", platform.platform())
+    logger.info("Processor: %s", platform.processor())
+    logger.info("Python Version: %s", platform.python_version())
+    logger.info("CPU Usage: %.2f%%", psutil.cpu_percent())
+    logger.info("Memory Usage: %.2f%%", psutil.virtual_memory().percent)
+    gpus = GPUtil.getGPUs()
+    for gpu in gpus:
+        logger.info("GPU: %s | Load: %.1f%% | Free Mem: %.1fMB | Used Mem: %.1fMB | Total Mem: %.1fMB",
+                    gpu.name, gpu.load*100, gpu.memoryFree, gpu.memoryUsed, gpu.memoryTotal)
 
 # ----------------------------
 # Preprocessing Module
@@ -375,18 +403,35 @@ class DataPipeline:
 
         return predictions, backtest_results
 
+# ----------------------------
+# Main Entry
+# ----------------------------
 if __name__ == "__main__":
-    # Load configuration settings from YAML
+    from tensorflow.keras import mixed_precision
+    from tqdm.keras import TqdmCallback
+
+    start_time = time.time()
+    log_system_info()
+
+    # Set up mixed precision
+    mixed_precision.set_global_policy('mixed_float16')
+    logger.info("Mixed precision enabled: using 'mixed_float16' policy.")
+
+    # Load configuration
     with open("configs/config.yaml", "r") as f:
         config = yaml.safe_load(f)
-    
+
     pipeline = DataPipeline(config)
-    
+
     # Uncomment the desired pipeline run:
     # For training:
     pipeline.run_training_pipeline()
-    
+
     # For inference:
     # predictions, backtest_results = pipeline.run_inference_pipeline()
     # print("Predictions:", predictions)
     # print("Backtest Results:\n", backtest_results)
+
+    elapsed = time.time() - start_time
+    logger.info("Training completed in %.2f seconds (%.2f minutes)", elapsed, elapsed / 60.0)
+    print("Pipeline completed successfully.")

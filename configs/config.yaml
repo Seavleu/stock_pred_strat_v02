@@ -36,18 +36,33 @@ paths:
   refined_features: "data/processed/refined_features.csv"
   dynamic_features: "data/processed/dynamic_selected_features.csv"
   scaled_features: "data/processed/engineered_features_scaled.csv"
-  model: "models/final_model.h5" 
-  model_testing: "models/testing_model.h5"
+  
+  model: "models/final_model.h5"  #lstm + transformer
+  model_final: "models/final_model.h5" #lstm + transformer
+  metrics: "models/evaluation_metrics.pkl" #lstm + transformer
+  predictions: output/predictions/forecast_results.csv
+
+  model_informer: "models/model_informer.h5"
+  model_informer_final: "models/final_model_informer.h5"
+  metrics_informer: "models/evaluation_metrics_informer.pkl"
+  
   model_lstm: models/trained_model.keras
   model_lstm_att: models/trained_model_lstm_att.keras
-  metrics: "models/evaluation_metrics.pkl"
   std_scaler: "models/std_scaler.pkl"
   minmax_scaler: "models/minmax_scaler.pkl"
   minmax_scaler_eval: "models/minmax_scaler_eval.pkl"
   global_scaler: artifacts/global_scaler.pkl # save fitted MinMax scale, saved by joblip.dump(), later use it consistently on new/unseen data (inference or production), test set, reverse scalling
+  predictions_backtesting: "data/processed/predictions_backtesting.csv"   # date, company, ticker, open, future_avg_return, future_avg_return_pred, etc.
 
 training:
   model_type: "transformer"  # choose "lstm" or "transformer"
   sequence_length: 10
   n_trials: 20
   final_epochs: 30
+
+backtesting:
+  threshold_up_quantile: 0.75
+  threshold_down_quantile: 0.25
+  transaction_cost: 0.001
+  slippage: 0.0005
+  output_dir: "output/plots"
