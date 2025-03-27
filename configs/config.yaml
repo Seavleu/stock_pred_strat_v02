@@ -58,7 +58,7 @@ training:
   model_type: "transformer"  # choose "lstm" or "transformer"
   sequence_length: 10
   n_trials: 20
-  final_epochs: 30
+  final_epochs: 10
 
 backtesting:
   threshold_up_quantile: 0.75

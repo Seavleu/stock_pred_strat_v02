@@ -67,7 +67,7 @@ class DynamicFeatureSelector:
 
         logging.info(f"Selected top {num_select} features out of {len(features)}")
 
-        meta_cols = ['date', 'company', 'ticker', 'next_day_close', 'day_after_next_close', 'future_5day_close', 'future_avg_return']
+        meta_cols = ['date', 'ticker', 'next_day_close', 'day_after_next_close', 'future_5day_return', 'future_avg_return']
         df_selected = df[meta_cols + selected_features]
         return df_selected
 
